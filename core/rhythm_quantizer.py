@@ -174,4 +174,48 @@ def quantize_rhythm_taksim(
 
     return quantized_notes, reference_bpm, "taksim"
 
-# ... (Keep estimate_tempo, detect_iqa, quantize_rhythm_arabic, and notes_to_measures the same as your previous version, as they work well for rigid Iqa'at) ...
+def estimate_tempo(note_segments: List[dict]) -> float:
+    """Placeholder for tempo estimation."""
+    return 120.0
+
+def detect_iqa(note_segments: List[dict], tempo: float) -> str:
+    """Placeholder for Iqa detection."""
+    return "maqsum"
+
+def notes_to_measures(quantized_notes: List[QuantizedNote], time_signature: Tuple[int, int] = (4, 4)) -> List[List[QuantizedNote]]:
+    """
+    Groups quantized notes into measures based on the time signature.
+    """
+    if not quantized_notes:
+        return []
+
+    numerator, denominator = time_signature
+    measure_duration_beats = Fraction(numerator, denominator) * 4 # in quarter notes
+
+    measures = []
+    current_measure = []
+    current_measure_beats = Fraction(0)
+
+    for note in quantized_notes:
+        # note.duration_beats is in whole notes, so multiply by 4 to get quarter notes
+        note_duration_beats = note.duration_beats * 4
+
+        if current_measure_beats + note_duration_beats > measure_duration_beats:
+            if current_measure:
+                measures.append(current_measure)
+            
+            current_measure = [note]
+            current_measure_beats = note_duration_beats
+        else:
+            current_measure.append(note)
+            current_measure_beats += note_duration_beats
+
+        if current_measure_beats == measure_duration_beats:
+            measures.append(current_measure)
+            current_measure = []
+            current_measure_beats = Fraction(0)
+
+    if current_measure:
+        measures.append(current_measure)
+
+    return measures

@@ -15,11 +15,12 @@ from core.audio_loader import load_audio, get_duration
 from core.pitch_extractor import extract_pitch_penn, segment_notes_sota
 from core.maqam_detector import detect_maqam_with_consistency
 from core.tuning import (
-    build_scale, quantize_to_maqam, get_quantization_error_cents, MAQAM
+    build_scale, quantize_to_maqam, get_quantization_error_cents, MAQAM,
+    calibrate_scale_to_performer
 )
 from core.instruments import get_instrument_range, INSTRUMENTS
 from output.musicxml_exporter import export_musicxml
-from core.rhythm_quantizer import quantize_rhythm_arabic, quantize_rhythm_taksim, notes_to_measures
+from core.rhythm_quantizer import quantize_rhythm_taksim, notes_to_measures
 
 
 def transcribe(
@@ -34,71 +35,68 @@ def transcribe(
     time_signature: tuple = (4, 4),
     verbose: bool = True,
 ) -> dict:
-    """SOTA transcription pipeline using PENN and Onset Segmentation."""
+    """
+    Main Entry Point: SOTA transcription pipeline.
+    
+    Orchestrates the following steps:
+    1. Audio Loading & Preprocessing.
+    2. Neural Pitch Extraction with integrated Viterbi Octave Correction.
+    3. Tuning-Invariant Maqam Detection.
+    4. Note Segmentation.
+    5. Rhythm Quantization.
+    6. MusicXML Export.
+    """
 
     def log(msg):
         if verbose:
             print(msg)
 
-    # ── Step 1: Load audio ──────────────────────────────────────────────
+    # ── Step 1: Load audio & Pre-process ──────────────────────────────
     log(f"\n{'='*60}")
-    log(f"  Arabic Music Transcriber (SOTA PENN Engine)")
+    log(f"  Arabic Music Transcriber (SOTA Engine)")
     log(f"{'='*60}")
-    log(f"\n[1/6] Loading audio: {audio_path}")
+    log(f"\n[1/6] Loading and cleaning audio: {audio_path}")
 
-    y, sr = load_audio(audio_path)
+    y, sr = load_audio(audio_path, isolate_melody=True)
     duration = get_duration(y, sr)
     log(f"      Duration: {duration:.1f}s, Sample rate: {sr}Hz")
+    log(f"      Applied spectral denoising and HPSS.")
 
-    # ── Step 2: Pitch extraction (Neural SOTA) ──────────────────────────
+    # ── Step 2: Pitch extraction (Custom Viterbi Decoder) ───────────────
     fmin, fmax = get_instrument_range(instrument)
-    log(f"\n[2/6] Extracting pitch with PENN (Viterbi Decoding)...")
-    log(f"      Instrument: {instrument}")
+    log(f"\n[2/6] Extracting pitch with custom Viterbi decoder...")
+    log(f"      Instrument: {instrument} (range: {fmin:.0f}-{fmax:.0f} Hz)")
 
-    # Using the new Base Engine
-    track = extract_pitch_penn(y, sr=sr)
-
-    voiced_ratio = track.voiced_mask.sum() / len(track.voiced_mask)
-    log(f"      Voiced frames: {voiced_ratio:.1%}")
-
-    # ── Step 3: Maqam Enforcement & Dynamic Tuning ───────────────────────
-    log(f"\n[3/6] Setting maqam & calibrating intonation...")
-
-    # 1. Get the exact human intonation peaks via SOTA KDE
-    from core.maqam_detector import extract_tuning_peaks_kde
-    peaks_cents, _, _ = extract_tuning_peaks_kde(list(track.frequencies), list(track.confidences))
+    # This function now contains the integrated octave correction logic
+    track = extract_pitch_penn(y, sr=sr, fmin=fmin, fmax=fmax)
+    log(f"      Voiced frames: {track.voiced_mask.sum() / len(track.voiced_mask):.1%}")
+    
+    # ── Step 3: Maqam Detection (Tuning-Invariant) ──────────────────────
+    log(f"\n[3/6] Detecting Maqam (Tuning-Invariant)...")
 
     if maqam_override:
         log(f"      Override provided: {maqam_override}")
         maqam_name = maqam_override
     else:
-        log("      Detecting maqam from pitch track...")
         candidates = detect_maqam_with_consistency(list(track.frequencies), list(track.confidences))
-        maqam_name = candidates[0].name if candidates else "Rast on C"
-        log(f"      Detected: {maqam_name}")
-
-    if maqam_name not in MAQAM:
-        available = ", ".join(MAQAM.keys())
-        raise ValueError(f"Unknown maqam: {maqam_name!r}\nAvailable: {available}")
-
-    log(f"      Building scale for: {maqam_name}")
-    raw_scale = build_scale(maqam_name)
-
-    # 2. BEND THE SCALE TO MATCH THE PERFORMER!
-    from core.tuning import calibrate_scale_to_performer
-    scale = calibrate_scale_to_performer(raw_scale, peaks_cents)
-    log(f"      Scale calibrated to performer's unique intonation.")
+        best_cand = candidates[0] if candidates else None
+        if best_cand:
+            maqam_name = best_cand.name
+            tuning_offset = best_cand.tuning_offset_cents
+            log(f"      Detected: {maqam_name} (Tuning: {tuning_offset:+.1f} cents)")
+        else:
+            maqam_name = "Rast on C"
+            log(f"      Detection failed, falling back to {maqam_name}")
 
     # ── Step 4: Note Segmentation (Velocity + Onsets) ───────────────────
     log(f"\n[4/6] Segmenting notes (Glissando-aware)...")
-
-    # Using the new SOTA segmenter which needs both the track and the raw audio
+    
+    scale = build_scale(maqam_name)
     raw_segments = segment_notes_sota(track, y)
-
     log(f"      Main notes detected: {len(raw_segments)}")
 
     # ── Step 5: Tuning & Rhythm Quantization ────────────────────────────
-    log(f"\n[5/6] Quantizing pitch (53-EDO) and rhythm...")
+    log(f"\n[5/6] Quantizing pitch and rhythm...")
 
     quantized_pitches = [
         quantize_to_maqam(seg["median_freq"], scale)
@@ -115,22 +113,17 @@ def transcribe(
         avg_error = sum(error_cents_list) / len(error_cents_list)
         log(f"      Avg tuning error: {avg_error:.1f} cents")
 
-    # Quantize Rhythm
-    if rhythm_mode == "metered":
-        quantized_notes, bpm, detected_iqa = quantize_rhythm_arabic(
-            raw_segments, quantized_pitches, iqa_override=iqa_override
-        )
-    else: # Auto or Taksim
-        quantized_notes, bpm, detected_iqa = quantize_rhythm_taksim(
-            raw_segments, quantized_pitches
-        )
-
-    measures = notes_to_measures(quantized_notes, time_signature)
+    quantized_notes, bpm, detected_iqa = quantize_rhythm_taksim(
+        raw_segments, quantized_pitches
+    )
     log(f"      Estimated BPM: {bpm:.0f}")
-    log(f"      Notes: {len(quantized_notes)}, Measures: {len(measures)}")
+    log(f"      Notes: {len(quantized_notes)}")
 
     # ── Step 6: MusicXML Export ─────────────────────────────────────────
     log(f"\n[6/6] Exporting MusicXML...")
+    
+    measures = notes_to_measures(quantized_notes, time_signature)
+    log(f"      Measures: {len(measures)}")
 
     title = Path(audio_path).stem.replace("_", " ").title()
     export_musicxml(
@@ -163,6 +156,7 @@ def transcribe(
 
 
 def open_in_musescore(file_path: str):
+    """Attempts to open the generated XML file in MuseScore across platforms."""
     if not os.path.exists(file_path):
         print(f"      ⚠ File not found: {file_path}")
         return
@@ -208,7 +202,6 @@ def main():
     parser.add_argument("audio", help="Input audio file")
     parser.add_argument("--output", "-o", default="output.xml", help="Output MusicXML file")
 
-    # Kept for compatibility, though we default to SOTA now
     parser.add_argument("--pipeline", "-p", default="full", choices=["mvp", "full"],
                         help="Pipeline mode")
 
