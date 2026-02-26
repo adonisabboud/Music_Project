@@ -11,6 +11,9 @@ pesto-pitch>=0.1.0
 pydub>=0.25.0
 soundfile>=0.10.0  # For additional audio format support
 
+# Audio Processing
+noisereduce>=2.0.0
+
 # MusicXML export
 musicxml>=0.5.0
 
@@ -18,3 +21,5 @@ musicxml>=0.5.0
 matplotlib>=3.5.0  # For debugging visualizations
 
 torchvision>=0.10.0  # For CNN
+
+penn

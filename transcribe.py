@@ -1,31 +1,32 @@
 """
-Arabic Music Transcriber — Main Pipeline with CQT
+Arabic Music Transcriber — SOTA Pipeline with PENN + Onset Segmentation
 """
 
 import argparse
+import os
+import platform
+import subprocess
 import sys
 from pathlib import Path
-from core.audio_loader import load_audio, get_duration
+
 sys.path.insert(0, str(Path(__file__).parent))
-import numpy as np
-from core.config import PITCH_EXTRACTION, RHYTHM_QUANTIZATION
-from core.pitch_extractor import extract_pitch_cqt, simple_segment_notes
-from core.maqam_detector import detect_maqam_with_consistency, MaqamCandidate
+
+from core.audio_loader import load_audio, get_duration
+from core.pitch_extractor import extract_pitch_penn, segment_notes_sota
+from core.maqam_detector import detect_maqam_with_consistency
 from core.tuning import (
-    build_scale, quantize_to_maqam, get_quantization_error_cents, MAQAM, IQA_AT
+    build_scale, quantize_to_maqam, get_quantization_error_cents, MAQAM,
+    calibrate_scale_to_performer
 )
-from core.instruments import get_instrument_range, list_instruments, INSTRUMENTS
+from core.instruments import get_instrument_range, INSTRUMENTS
 from output.musicxml_exporter import export_musicxml
-from core.rhythm_quantizer import quantize_rhythm_arabic, quantize_rhythm_taksim, notes_to_measures
-import subprocess
-import platform
-import os
+from core.rhythm_quantizer import quantize_rhythm_taksim, notes_to_measures
 
 
 def transcribe(
     audio_path: str,
     output_path: str,
-    pipeline_mode: str = "mvp",
+    pipeline_mode: str = "full",
     rhythm_mode: str = "auto",
     maqam_override: str = None,
     bpm_override: float = None,
@@ -34,91 +35,69 @@ def transcribe(
     time_signature: tuple = (4, 4),
     verbose: bool = True,
 ) -> dict:
-    """Full transcription pipeline with explicit MVP and Full modes."""
+    """
+    Main Entry Point: SOTA transcription pipeline.
+    
+    Orchestrates the following steps:
+    1. Audio Loading & Preprocessing.
+    2. Neural Pitch Extraction with integrated Viterbi Octave Correction.
+    3. Tuning-Invariant Maqam Detection.
+    4. Note Segmentation.
+    5. Rhythm Quantization.
+    6. MusicXML Export.
+    """
 
     def log(msg):
         if verbose:
             print(msg)
 
-    # ── Step 1: Load audio ──────────────────────────────────────────────
+    # ── Step 1: Load audio & Pre-process ──────────────────────────────
     log(f"\n{'='*60}")
-    log(f"  Arabic Music Transcriber ({pipeline_mode.upper()} Pipeline)")
+    log(f"  Arabic Music Transcriber (SOTA Engine)")
     log(f"{'='*60}")
-    log(f"\n[1/6] Loading audio: {audio_path}")
+    log(f"\n[1/6] Loading and cleaning audio: {audio_path}")
 
-    y, sr = load_audio(audio_path)
+    y, sr = load_audio(audio_path, isolate_melody=True)
     duration = get_duration(y, sr)
     log(f"      Duration: {duration:.1f}s, Sample rate: {sr}Hz")
+    log(f"      Applied spectral denoising and HPSS.")
 
-    # ── Step 2: Pitch extraction (Shared Logic) ─────────────────────────
+    # ── Step 2: Pitch extraction (Custom Viterbi Decoder) ───────────────
     fmin, fmax = get_instrument_range(instrument)
-    log(f"\n[2/6] Extracting pitch with CQT (53-EDO)...")
+    log(f"\n[2/6] Extracting pitch with custom Viterbi decoder...")
     log(f"      Instrument: {instrument} (range: {fmin:.0f}-{fmax:.0f} Hz)")
 
-    track = extract_pitch_cqt(
-        y, sr,
-        fmin=fmin,
-        fmax=fmax,
-        confidence_threshold=PITCH_EXTRACTION['cqt_confidence_threshold'],
-        verbose=verbose,
-    )
+    # This function now contains the integrated octave correction logic
+    track = extract_pitch_penn(y, sr=sr, fmin=fmin, fmax=fmax)
+    log(f"      Voiced frames: {track.voiced_mask.sum() / len(track.voiced_mask):.1%}")
+    
+    # ── Step 3: Maqam Detection (Tuning-Invariant) ──────────────────────
+    log(f"\n[3/6] Detecting Maqam (Tuning-Invariant)...")
 
-    voiced_ratio = track.voiced_mask.sum() / len(track.voiced_mask)
-    log(f"      Voiced frames: {voiced_ratio:.1%}")
-
-
-    # ── Step 3: Maqam Enforcement ───────────────────────────────────────
-    log(f"\n[3/6] Setting maqam...")
-
-    if pipeline_mode == "mvp":
-        log("      [MVP MODE] Bypassing auto-detection. Using override or default.")
-        maqam_name = maqam_override or "Rast on C"
+    if maqam_override:
+        log(f"      Override provided: {maqam_override}")
+        maqam_name = maqam_override
     else:
-        log("      [FULL MODE] Attempting auto-detection...")
-        if maqam_override:
-            log(f"      Override provided: {maqam_override}")
-            maqam_name = maqam_override
+        candidates = detect_maqam_with_consistency(list(track.frequencies), list(track.confidences))
+        best_cand = candidates[0] if candidates else None
+        if best_cand:
+            maqam_name = best_cand.name
+            tuning_offset = best_cand.tuning_offset_cents
+            log(f"      Detected: {maqam_name} (Tuning: {tuning_offset:+.1f} cents)")
         else:
-            # Future Full Logic Placeholder
-            log("      Detecting maqam from pitch track...")
-            candidates = detect_maqam_with_consistency(track)
-            maqam_name = candidates[0].name if candidates else "Rast on C"
-            log(f"      Detected: {maqam_name}")
+            maqam_name = "Rast on C"
+            log(f"      Detection failed, falling back to {maqam_name}")
 
-    if maqam_name not in MAQAM:
-        available = ", ".join(MAQAM.keys())
-        raise ValueError(f"Unknown maqam: {maqam_name!r}\nAvailable: {available}")
-
-    log(f"      Building scale for: {maqam_name}")
+    # ── Step 4: Note Segmentation (Velocity + Onsets) ───────────────────
+    log(f"\n[4/6] Segmenting notes (Glissando-aware)...")
+    
     scale = build_scale(maqam_name)
-
-
-    # ── Step 4: Note Segmentation ───────────────────────────────────────
-    log(f"\n[4/6] Segmenting notes...")
-
-    if pipeline_mode == "mvp":
-        log("      [MVP MODE] Basic segmentation (strict noise gate).")
-        raw_segments = simple_segment_notes(
-            frequencies=track.frequencies,
-            times=track.times,
-            min_duration_sec=0.12  # Strict gate for noise
-        )
-    else:
-        log("      [FULL MODE] High-resolution segmentation...")
-        # Placeholder for future advanced segmentation (faster notes)
-        raw_segments = simple_segment_notes(
-            frequencies=track.frequencies,
-            times=track.times,
-            min_duration_sec=0.05
-        )
-
+    raw_segments = segment_notes_sota(track, y)
     log(f"      Main notes detected: {len(raw_segments)}")
 
-
     # ── Step 5: Tuning & Rhythm Quantization ────────────────────────────
-    log(f"\n[5/6] Quantizing pitch (53-EDO) and rhythm...")
+    log(f"\n[5/6] Quantizing pitch and rhythm...")
 
-    # Quantize pitch (Shared)
     quantized_pitches = [
         quantize_to_maqam(seg["median_freq"], scale)
         for seg in raw_segments
@@ -134,30 +113,17 @@ def transcribe(
         avg_error = sum(error_cents_list) / len(error_cents_list)
         log(f"      Avg tuning error: {avg_error:.1f} cents")
 
-    # Quantize Rhythm
-    if pipeline_mode == "mvp":
-        log("      [MVP MODE] Forcing Taksim (Free Rhythm) to map durations safely.")
-        quantized_notes, bpm, detected_iqa = quantize_rhythm_taksim(
-            raw_segments, quantized_pitches
-        )
-    else:
-        log(f"      [FULL MODE] Processing rhythm mode: {rhythm_mode}")
-        if rhythm_mode == "metered":
-            quantized_notes, bpm, detected_iqa = quantize_rhythm_arabic(
-                raw_segments, quantized_pitches, iqa_override=iqa_override
-            )
-        else: # Auto or Taksim
-            quantized_notes, bpm, detected_iqa = quantize_rhythm_taksim(
-                raw_segments, quantized_pitches
-            )
-
-    measures = notes_to_measures(quantized_notes, time_signature)
+    quantized_notes, bpm, detected_iqa = quantize_rhythm_taksim(
+        raw_segments, quantized_pitches
+    )
     log(f"      Estimated BPM: {bpm:.0f}")
-    log(f"      Notes: {len(quantized_notes)}, Measures: {len(measures)}")
-
+    log(f"      Notes: {len(quantized_notes)}")
 
     # ── Step 6: MusicXML Export ─────────────────────────────────────────
     log(f"\n[6/6] Exporting MusicXML...")
+    
+    measures = notes_to_measures(quantized_notes, time_signature)
+    log(f"      Measures: {len(measures)}")
 
     title = Path(audio_path).stem.replace("_", " ").title()
     export_musicxml(
@@ -190,6 +156,7 @@ def transcribe(
 
 
 def open_in_musescore(file_path: str):
+    """Attempts to open the generated XML file in MuseScore across platforms."""
     if not os.path.exists(file_path):
         print(f"      ⚠ File not found: {file_path}")
         return
@@ -197,7 +164,7 @@ def open_in_musescore(file_path: str):
     system = platform.system()
     try:
         if system == "Linux":
-            musescore_cmds = ['musescore', 'musescore3', 'mscore', 'mscore3']
+            musescore_cmds = ['musescore', 'musescore3', 'mscore', 'mscore3', 'musescore4']
             for cmd in musescore_cmds:
                 try:
                     subprocess.run([cmd, file_path], check=True, capture_output=True)
@@ -208,8 +175,8 @@ def open_in_musescore(file_path: str):
             print("      ⚠ MuseScore not found. Please install it or open manually.")
         elif system == "Windows":
             possible_paths = [
-                r"C:\Program Files\MuseScore 3\bin\MuseScore3.exe",
                 r"C:\Program Files\MuseScore 4\bin\MuseScore4.exe",
+                r"C:\Program Files\MuseScore 3\bin\MuseScore3.exe",
                 r"C:\Program Files (x86)\MuseScore 3\bin\MuseScore3.exe",
             ]
             for path in possible_paths:
@@ -235,11 +202,11 @@ def main():
     parser.add_argument("audio", help="Input audio file")
     parser.add_argument("--output", "-o", default="output.xml", help="Output MusicXML file")
 
-    parser.add_argument("--pipeline", "-p", default="mvp", choices=["mvp", "full"],
-                        help="Pipeline mode: 'mvp' (fast/safe defaults) or 'full' (advanced detection)")
+    parser.add_argument("--pipeline", "-p", default="full", choices=["mvp", "full"],
+                        help="Pipeline mode")
 
     parser.add_argument("--mode", "-M", default="auto", choices=["auto", "metered", "taksim"],
-                        help="Rhythm mode (for full pipeline)")
+                        help="Rhythm mode")
     parser.add_argument("--maqam", "-m", default=None, help="Override maqam")
     parser.add_argument("--iqa", default=None, help="Override iqa'")
     parser.add_argument("--instrument", "-i", default="general", choices=list(INSTRUMENTS.keys()), help="Instrument type")
@@ -269,7 +236,6 @@ def main():
         verbose=not args.quiet,
     )
     print(f"\nSummary:")
-    print(f"  Pipeline:   {args.pipeline.upper()}")
     print(f"  Maqam:      {result['maqam']}")
     print(f"  Iqa':       {result['iqa'] or 'None (taksim)'}")
     print(f"  BPM:        {result['bpm']:.0f}")

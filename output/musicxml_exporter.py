@@ -21,6 +21,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass
+import math
 
 from core.rhythm_quantizer import QuantizedNote
 
@@ -52,6 +53,7 @@ DURATION_TYPE = {
     Fraction(1, 4): ("quarter", 0),
     Fraction(3, 16): ("eighth", 1),
     Fraction(1, 8): ("eighth", 0),
+    Fraction(1, 12): ("16th", 0), # Fallback for triplets
     Fraction(1, 16): ("16th", 0),
     Fraction(1, 32): ("32nd", 0),
 }
@@ -100,11 +102,10 @@ def freq_to_octave(freq_hz: float) -> int:
     if freq_hz <= 0:
         return 4
 
-    import math
     semitones_from_c0 = 12 * math.log2(freq_hz / 16.3516)
     octave = int(semitones_from_c0 // 12)
 
-    # FIX: Hard-clamp the octave between 3 and 5.
+    # Hard-clamp the octave between 3 and 5.
     return max(3, min(5, octave))
 
 
@@ -113,7 +114,7 @@ def label_to_mxl_note(note: QuantizedNote) -> Optional[MXLNote]:
     label = note.note_label
 
     if label not in NOTE_LABEL_TO_MXL:
-        # FIX: Sort keys by length descending!
+        # Sort keys by length descending!
         # This forces it to check "E_half_flat" BEFORE it checks "E".
         sorted_keys = sorted(NOTE_LABEL_TO_MXL.keys(), key=len, reverse=True)
         for key in sorted_keys:
@@ -135,6 +136,7 @@ def label_to_mxl_note(note: QuantizedNote) -> Optional[MXLNote]:
         duration_dots=dots,
         accidental_display=ACCIDENTAL_TEXT.get(alter),
     )
+
 # ──────────────────────────────────────────────
 # MusicXML builder
 # ──────────────────────────────────────────────
@@ -149,6 +151,7 @@ DURATION_BEATS_TO_DIVISIONS = {
     Fraction(1, 4): DIVISIONS,
     Fraction(3, 16): int(DIVISIONS * 0.75),
     Fraction(1, 8): DIVISIONS // 2,
+    Fraction(1, 12): int(DIVISIONS / 1.5),
     Fraction(1, 16): DIVISIONS // 4,
     Fraction(1, 32): DIVISIONS // 8,
 }
@@ -164,8 +167,7 @@ def build_musicxml(
 ) -> str:
     """
     Build a complete MusicXML document from quantized measures.
-
-    Returns the MusicXML as a string.
+    Now with Grace Note (Ornament) Support!
     """
     lines = []
 
@@ -188,7 +190,7 @@ def build_musicxml(
     if maqam_name:
         lines.append('    <rights>Maqam: ' + _esc(maqam_name) + '</rights>')
     lines.append('    <encoding>')
-    lines.append('      <software>Arabic Transcriber (53-EDO)</software>')
+    lines.append('      <software>Arabic Transcriber (SOTA Engine)</software>')
     lines.append('    </encoding>')
     lines.append('  </identification>')
 
@@ -235,12 +237,33 @@ def build_musicxml(
             if maqam_name:
                 lines.append('      <direction placement="above">')
                 lines.append('        <direction-type>')
-                lines.append(f'          <words font-style="italic">Maqam: {_esc(maqam_name)}</words>')
+                lines.append(f'          <words font-style="italic" font-weight="bold" default-y="20">Maqam: {_esc(maqam_name)}</words>')
                 lines.append('        </direction-type>')
                 lines.append('      </direction>')
 
-        # Notes
+        # Process Notes (and their ornaments)
         for note in measure_notes:
+
+            # 1. PROCESS GRACE NOTES (ORNAMENTS) FIRST
+            for ornament in note.ornaments_before:
+                mxl_ornament = label_to_mxl_note(ornament)
+                if mxl_ornament is None:
+                    continue
+
+                lines.append('      <note>')
+                lines.append('        <grace slash="yes"/>')  # This makes it a grace note!
+                lines.append('        <pitch>')
+                lines.append(f'          <step>{mxl_ornament.step}</step>')
+                if mxl_ornament.alter != 0.0:
+                    lines.append(f'          <alter>{mxl_ornament.alter}</alter>')
+                lines.append(f'          <octave>{mxl_ornament.octave}</octave>')
+                lines.append('        </pitch>')
+                lines.append('        <type>16th</type>') # Grace notes are visually rendered as 16th notes
+                if mxl_ornament.accidental_display:
+                    lines.append(f'        <accidental>{mxl_ornament.accidental_display}</accidental>')
+                lines.append('      </note>')
+
+            # 2. PROCESS MAIN NOTE
             mxl = label_to_mxl_note(note)
             if mxl is None:
                 continue
@@ -260,8 +283,7 @@ def build_musicxml(
                     lines.append('        <dot/>')
             if mxl.accidental_display:
                 lines.append(f'        <accidental>{mxl.accidental_display}</accidental>')
-            # Notations
-            lines.append('        <notations/>')
+
             lines.append('      </note>')
 
         lines.append('    </measure>')
@@ -291,13 +313,11 @@ def export_musicxml(
 ) -> Path:
     """
     Write MusicXML to file.
-
-    Returns the output path.
     """
     xml = build_musicxml(
         measures, title, composer, maqam_name, bpm, time_signature
     )
     output_path = Path(output_path)
     output_path.write_text(xml, encoding="utf-8")
-    print(f"MusicXML saved: {output_path}")
+    print(f"      ✓ MusicXML saved: {output_path}")
     return output_path
