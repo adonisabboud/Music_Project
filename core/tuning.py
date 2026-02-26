@@ -10,7 +10,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Optional
 import numpy as np
-
+import copy
 # ──────────────────────────────────────────────
 # Constants
 # ──────────────────────────────────────────────
@@ -166,8 +166,7 @@ def detect_rhythm_type(segments: list) -> str:
     if cv > 0.8:  # High variation indicates free rhythm
         return "taksim"
     
-    # Try to detect specific iqa'
-    from collections import Counter
+    # Try to detect specific iqa'at patterns
     # Normalize durations to find common patterns
     min_dur = min(durations)
     norm_durs = [round(d / min_dur) for d in durations]
@@ -524,3 +523,45 @@ def analyze_pitch_for_microtones(
                 })
 
     return results
+
+
+def calibrate_scale_to_performer(scale: list['ScaleNote'], peaks_cents: np.ndarray) -> list['ScaleNote']:
+    """
+    SOTA Dynamic Tuning: Shifts the theoretical 53-EDO scale frequencies
+    to perfectly match the performer's actual intonation peaks (KDE).
+    """
+    # Create a copy so we don't permanently mutate the mathematical constants
+    calibrated_scale = copy.deepcopy(scale)
+    C4 = 261.63  # Your base reference
+
+    for note in calibrated_scale:
+        # 1. Find where this note mathematically sits in the 0-1200 cent octave
+        theoretical_cents = (1200 * math.log2(note.freq_hz / C4)) % 1200
+
+        # 2. Find the closest human performer peak within a +/- 35 cent window
+        closest_peak = None
+        min_dist = 35.0
+
+        for peak in peaks_cents:
+            # Calculate circular distance (handles wrap-around at C, e.g., 1195 to 5 cents)
+            dist = min(abs(theoretical_cents - peak),
+                       abs(theoretical_cents - peak + 1200),
+                       abs(theoretical_cents - peak - 1200))
+
+            if dist < min_dist:
+                min_dist = dist
+                closest_peak = peak
+
+        # 3. Apply the human tuning offset
+        if closest_peak is not None:
+            # Find the signed difference to shift the note
+            diff = closest_peak - theoretical_cents
+            if diff > 600: diff -= 1200
+            if diff < -600: diff += 1200
+
+            # Shift the exact frequency of this scale degree
+            note.freq_hz = note.freq_hz * (2 ** (diff / 1200.0))
+            # We also update a debug label so we can see the offset
+            note.label = f"{note.label} ({diff:+.1f}c)"
+
+    return calibrated_scale

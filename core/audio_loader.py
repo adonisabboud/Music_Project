@@ -1,10 +1,11 @@
 """
-Audio Loader
+Audio Loader — SOTA Pipeline
 
 Handles loading audio files in WAV, MP3, and M4A/AAC formats.
-Normalizes to mono, 16kHz (CREPE-optimal sample rate).
+Normalizes to mono, 16kHz (Native sample rate for PENN).
 
-Dependencies: librosa, pydub
+Includes optional Harmonic-Percussive Source Separation (HPSS)
+to strip away drums, plectrum clicks, and room noise.
 """
 
 import numpy as np
@@ -12,21 +13,22 @@ from pathlib import Path
 
 
 SUPPORTED_FORMATS = {".wav", ".mp3", ".m4a", ".aac", ".flac"}
-TARGET_SR = 16000   # Hz — optimal for CREPE pitch detection
+TARGET_SR = 16000   # Hz — Native rate for PENN pitch extraction
 
 
-def load_audio(path: str | Path, target_sr: int = TARGET_SR) -> tuple[np.ndarray, int]:
+def load_audio(path: str | Path, target_sr: int = TARGET_SR, isolate_melody: bool = False) -> tuple[np.ndarray, int]:
     """
     Load an audio file and return (audio_array, sample_rate).
 
-    - Converts stereo to mono (average channels)
+    - Converts stereo to mono
     - Resamples to target_sr
     - Normalizes amplitude to [-1, 1]
-    - Supports WAV, MP3, M4A/AAC, FLAC
+    - (Optional) Applies HPSS to isolate the harmonic melody
 
     Args:
         path: Path to audio file
-        target_sr: Target sample rate (default 16000 for CREPE)
+        target_sr: Target sample rate (default 16000 for PENN)
+        isolate_melody: If True, uses HPSS to remove percussion/noise
 
     Returns:
         (y, sr) where y is float32 numpy array, sr is sample rate
@@ -44,12 +46,9 @@ def load_audio(path: str | Path, target_sr: int = TARGET_SR) -> tuple[np.ndarray
             f"Supported: {', '.join(SUPPORTED_FORMATS)}"
         )
 
-    # librosa handles WAV, MP3, FLAC natively.
-    # For M4A/AAC, it falls back to soundfile/pydub.
     try:
         y, sr = librosa.load(str(path), sr=target_sr, mono=True)
     except Exception as e:
-        # Fallback: use pydub to convert to WAV first
         try:
             y, sr = _load_via_pydub(path, target_sr)
         except Exception as e2:
@@ -59,6 +58,12 @@ def load_audio(path: str | Path, target_sr: int = TARGET_SR) -> tuple[np.ndarray
                 f"pydub error: {e2}\n"
                 f"Try: pip install pydub && brew install ffmpeg"
             )
+
+    # Apply SOTA Source Separation if requested
+    if isolate_melody:
+        # HPSS splits the audio into Harmonic (Melody) and Percussive (Noise/Drums)
+        # We only keep the harmonic component for cleaner pitch tracking
+        y, _ = librosa.effects.hpss(y)
 
     # Normalize
     peak = np.abs(y).max()
@@ -71,7 +76,6 @@ def load_audio(path: str | Path, target_sr: int = TARGET_SR) -> tuple[np.ndarray
 def _load_via_pydub(path: Path, target_sr: int) -> tuple[np.ndarray, int]:
     """Load audio via pydub (requires ffmpeg for M4A/AAC)."""
     from pydub import AudioSegment
-    import io
 
     audio = AudioSegment.from_file(str(path))
     audio = audio.set_channels(1).set_frame_rate(target_sr)
@@ -95,7 +99,7 @@ def split_into_chunks(
 ) -> list[np.ndarray]:
     """
     Split long audio into overlapping chunks for processing.
-    Useful for pieces longer than ~60 seconds.
+    Useful for pieces longer than ~60 seconds to prevent RAM overload.
     """
     chunk_samples = int(chunk_sec * sr)
     overlap_samples = int(overlap_sec * sr)

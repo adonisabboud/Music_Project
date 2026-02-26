@@ -1,9 +1,10 @@
 """
 Instrument Profiles
 
-Defines the expected frequency ranges for instruments commonly used
-in Arabic music. These ranges are passed to pYIN to prevent octave
-errors — pYIN can track sub-octave harmonics if given too wide a range.
+Defines the expected frequency ranges for instruments commonly used in Arabic music.
+These ranges are passed to the SOTA neural pitch tracker (PENN)
+to prevent octave errors — neural models can sometimes hallucinate sub-octave
+harmonics if given too wide a search range.
 """
 
 from dataclasses import dataclass

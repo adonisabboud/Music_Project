@@ -14,17 +14,21 @@ from Sikah.
 """
 
 import math
-import numpy as np
 from dataclasses import dataclass
 from typing import Optional
+
+import numpy as np
+from scipy.signal import find_peaks
+from scipy.stats import gaussian_kde
 
 from .tuning import (
     MAQAM,
     OCT,
     build_scale,
-    freq_to_commas,
     ScaleNote,
 )
+
+# Keep your existing imports (MAQAM, OCT, build_scale, etc.)
 
 # ──────────────────────────────────────────────
 # Configuration
@@ -128,96 +132,118 @@ def _score_maqam(
 # Pitch histogram builder
 # ──────────────────────────────────────────────
 
-def build_pitch_histogram(
+def extract_tuning_peaks_kde(
         frequencies: list[float],
-        confidences: Optional[list[float]] = None,
-        min_freq: float = 80.0,
-        max_freq: float = 1200.0,
-) -> np.ndarray:
+        confidences: list[float],
+        min_conf: float = 0.5
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Build a 53-bin histogram of pitch energy in comma-space (one octave).
-
-    Each detected frequency is folded into a single octave [0, 53)
-    and accumulated into the nearest bin, weighted by confidence.
-
-    Args:
-        frequencies: List of detected frequencies in Hz (0 = unvoiced)
-        confidences: Optional confidence weights per frame (0..1)
-        min_freq: Ignore frequencies below this (likely noise)
-        max_freq: Ignore frequencies above this
-
-    Returns:
-        np.ndarray of shape (53,) — normalized pitch histogram
+    SOTA Dynamic Tuning using Kernel Density Estimation (KDE).
+    Finds the *actual* microtonal peaks played by the musician.
     """
-    histogram = np.zeros(53)
+    # 1. Filter out noise and unvoiced frames
+    valid_idx = [i for i, (f, c) in enumerate(zip(frequencies, confidences)) if f > 0 and c > min_conf]
+    if not valid_idx:
+        return np.array([]), np.array([]), np.zeros(1200)
 
-    if confidences is None:
-        confidences = [1.0] * len(frequencies)
+    valid_freqs = np.array([frequencies[i] for i in valid_idx])
+    valid_confs = np.array([confidences[i] for i in valid_idx])
 
-    for freq, conf in zip(frequencies, confidences):
-        if freq <= min_freq or freq > max_freq or conf < 0.1:
-            continue
+    # 2. Convert to Cents relative to C4 (261.63 Hz) and fold into 1 octave (0-1200 cents)
+    cents = 1200 * np.log2(valid_freqs / 261.63)
+    cents_folded = np.mod(cents, 1200)
 
-        commas = freq_to_commas(freq)
-        # Fold into one octave
-        rel = commas % OCT
-        if rel < 0:
-            rel += OCT
+    # 3. Handle Octave Wrap-Around for KDE
+    # To ensure notes near C (0 or 1200) don't get cut off, we duplicate the data
+    cents_padded = np.concatenate([cents_folded - 1200, cents_folded, cents_folded + 1200])
+    weights_padded = np.concatenate([valid_confs, valid_confs, valid_confs])
 
-        # Distribute weight into nearest bins (soft binning)
-        bin_center = rel
-        for bin_idx in range(53):
-            bin_pos = float(bin_idx)
-            dist = abs(bin_center - bin_pos)
-            # Wrap-around distance
-            dist = min(dist, OCT - dist)
-            # Gaussian soft binning (sigma ≈ 1 comma)
-            weight = conf * math.exp(-0.5 * (dist ** 2))
-            histogram[bin_idx] += weight
+    # 4. Calculate continuous Kernel Density Estimation (The "Hills")
+    # Bandwidth of 0.02 roughly equals a ~24 cent smoothing window
+    kde = gaussian_kde(cents_padded, weights=weights_padded, bw_method=0.02)
 
-    total = histogram.sum()
-    if total > 0:
-        histogram /= total
+    # Evaluate the KDE over our 1-octave grid (0 to 1199 cents)
+    x_grid = np.arange(0, 1200)
+    kde_curve = kde(x_grid)
 
-    return histogram
+    # Normalize the curve
+    kde_curve = kde_curve / np.max(kde_curve)
 
+    # 5. Find the Peaks (The actual notes played)
+    # distance=35 means notes must be at least 35 cents apart
+    # prominence=0.05 filters out tiny noise bumps
+    peaks, properties = find_peaks(kde_curve, distance=35, prominence=0.05)
+
+    return peaks, kde_curve[peaks], kde_curve
 
 # ──────────────────────────────────────────────
 #  detector
 # ──────────────────────────────────────────────
 
-def detect_maqam(
+def detect_maqam_sota(
         frequencies: list[float],
         confidences: Optional[list[float]] = None,
-        top_n: int = 3,
-        min_freq: float = 80.0,
-        max_freq: float = 1200.0,
+        top_n: int = 3
 ) -> list[MaqamCandidate]:
     """
-    Auto-detect the maqam from a list of detected frequencies.
-
-    Args:
-        frequencies: Per-frame fundamental frequencies in Hz (0 = unvoiced)
-        confidences: Per-frame confidence values (0..1)
-        top_n: How many top candidates to return
-        min_freq: Minimum plausible frequency
-        max_freq: Maximum plausible frequency
-
-    Returns:
-        List of MaqamCandidate objects, sorted by score descending.
-        The first entry is the most likely maqam.
+    Detects Maqam by comparing theoretical scales to the continuous KDE pitch curve.
     """
-    histogram = build_pitch_histogram(frequencies, confidences, min_freq, max_freq)
+    if confidences is None:
+        confidences = [1.0] * len(frequencies)
+
+    # Generate the actual tuning fingerprint of the performer
+    peaks, peak_heights, kde_curve = extract_tuning_peaks_kde(frequencies, confidences)
 
     candidates = []
+
     for maqam_name, m in MAQAM.items():
-        # Score with each possible upper jins
         for upper_j in m.upper_options:
-            c = _score_maqam(histogram, maqam_name, upper_j)
-            # Label with upper jins if different from default
-            if upper_j != m.upper_default:
-                c.name = f"{maqam_name} + upper {upper_j}"
-            candidates.append(c)
+            scale = build_scale(maqam_name, upper_j)
+
+            score = 0.0
+            max_possible = 0.0
+            matched_degrees = []
+            tonic_detected = False
+
+            for note in scale:
+                # Convert 53-EDO comma position to cents
+                expected_cents = (note.abs_commas % 53) * (1200.0 / 53.0)
+
+                # Weight microtonal notes heavier (they are the fingerprint of the maqam)
+                weight = 2.5 if note.is_micro else 1.0
+                max_possible += weight
+
+                # Find the maximum KDE energy within a +/- 35 cent window of the expected note
+                # This explicitly allows the performer to be "out of tune" with math, but in tune with tradition
+                window_start = int(expected_cents - 35) % 1200
+                window_end = int(expected_cents + 35) % 1200
+
+                if window_start < window_end:
+                    energy = np.max(kde_curve[window_start:window_end])
+                else:  # Wrap around octave boundary
+                    energy = max(np.max(kde_curve[window_start:]), np.max(kde_curve[:window_end]))
+
+                degree_score = energy * weight
+                score += degree_score
+
+                if energy > 0.15:  # Significant presence
+                    matched_degrees.append(note.label)
+                    if note.is_tonic:
+                        tonic_detected = True
+
+            # Apply bonuses
+            if tonic_detected: score *= 1.5
+            if upper_j == m.upper_default: score *= 1.15
+
+            normalized = min(score / (max_possible * 1.5), 1.0)
+
+            name = f"{maqam_name} + upper {upper_j}" if upper_j != m.upper_default else maqam_name
+
+            candidates.append(MaqamCandidate(
+                name=name, score=normalized,
+                tonic_detected=tonic_detected,
+                matched_degrees=matched_degrees, scale=scale
+            ))
 
     candidates.sort(key=lambda c: c.score, reverse=True)
     return candidates[:top_n]
@@ -226,17 +252,18 @@ def detect_maqam(
 def detect_maqam_windowed(
         frequencies: list[float],
         confidences: Optional[list[float]] = None,
-        frame_rate: float = 100.0,  # frames per second (CREPE default)
-        window_sec: float = 8.0,  # analyze first N seconds for maqam ID
+        frame_rate: float = 100.0,  # 100fps matches PENN's 10ms hopsize
+        window_sec: float = 8.0,
 ) -> list[MaqamCandidate]:
     """
-    Use only the first `window_sec` of audio for maqam detection.
-    The opening of a piece is usually the most tonally clear.
+    Analyzes the opening phrase (Seyir) where the tonal center is usually established.
     """
     n_frames = int(window_sec * frame_rate)
     freqs = frequencies[:n_frames]
     confs = confidences[:n_frames] if confidences else None
-    return detect_maqam(freqs, confs)
+
+    # Route to the new KDE engine
+    return detect_maqam_sota(freqs, confs)
 
 
 def detect_maqam_with_consistency(
@@ -245,13 +272,15 @@ def detect_maqam_with_consistency(
         frame_rate: float = 100.0,
 ) -> list[MaqamCandidate]:
     """
-    Detect maqam with temporal consistency checks.
+    Chunks the audio to find the 'home' Maqam, preventing temporary
+    modulations in a Taksim from skewing the overall transcription.
     """
-    # Split into segments and detect maqam per segment
     segment_duration = 4.0  # seconds
     frames_per_segment = int(segment_duration * frame_rate)
 
     segment_candidates = []
+
+    # 1. Chunk the performance and test each 4-second window
     for i in range(0, len(frequencies), frames_per_segment):
         seg_freqs = frequencies[i:i + frames_per_segment]
         seg_confs = confidences[i:i + frames_per_segment] if confidences else None
@@ -259,26 +288,28 @@ def detect_maqam_with_consistency(
         if len(seg_freqs) < frames_per_segment // 2:
             continue
 
-        candidates = detect_maqam(seg_freqs, seg_confs, top_n=2)
+        candidates = detect_maqam_sota(seg_freqs, seg_confs, top_n=2)
         if candidates:
             segment_candidates.append(candidates[0].name)
 
-    # Find most consistent maqam across segments
+    # 2. Find the 'home' maqam (most frequent across all chunks)
     from collections import Counter
     counter = Counter(segment_candidates)
+
     if counter:
         most_common = counter.most_common(1)[0][0]
 
-        # Re-score with full audio but bias toward consistent maqam
-        full_candidates = detect_maqam(frequencies, confidences, top_n=5)
+        # 3. Re-score with full audio using the KDE engine, but bias toward the home maqam
+        full_candidates = detect_maqam_sota(frequencies, confidences, top_n=5)
         for cand in full_candidates:
             if cand.name == most_common:
-                cand.score *= 1.2  # Boost consistent maqam
+                cand.score *= 1.2  # Boost consistent 'home' maqam
 
         full_candidates.sort(key=lambda c: c.score, reverse=True)
         return full_candidates
 
-    return detect_maqam(frequencies, confidences)
+    return detect_maqam_sota(frequencies, confidences)
+
 
 def detect_modulations(
         frequencies: list[float],
@@ -287,16 +318,8 @@ def detect_modulations(
         window_sec: float = 5.0
 ) -> list[tuple[float, str]]:
     """
-    Detect if the maqam changes over time by analyzing sliding windows.
-
-    Args:
-        frequencies: Per-frame fundamental frequencies in Hz
-        confidences: Per-frame confidence values
-        frame_rate: Frames per second
-        window_sec: Duration of each analysis window in seconds
-
-    Returns:
-        List of (time_in_seconds, maqam_name) tuples for each window
+    Detects dynamic shifts (modulations) over time.
+    Perfect for mapping a long Taksim or Wasla.
     """
     if confidences is None:
         confidences = [1.0] * len(frequencies)
@@ -310,7 +333,7 @@ def detect_modulations(
 
         # Only analyze windows with enough data
         if len(window_freqs) > frame_window / 2:
-            candidates = detect_maqam(window_freqs, window_confs, top_n=1)
+            candidates = detect_maqam_sota(window_freqs, window_confs, top_n=1)
             if candidates:
                 time_in_seconds = i / frame_rate
                 windows.append((time_in_seconds, candidates[0].name))
@@ -319,59 +342,3 @@ def detect_modulations(
 
 
 # ─────────────────────
-
-# ──────────────────────────────────────────────
-# Self-test
-# ──────────────────────────────────────────────
-
-if __name__ == "__main__":
-    print("=== Maqam Detector Self-Test ===\n")
-
-    # Simulate a Bayati on D performance by generating frequencies
-    # from the Bayati scale with some noise and ornamentation
-    rng = np.random.default_rng(42)
-
-    bayati_scale = build_scale("Bayati on D")
-    test_freqs = []
-    test_confs = []
-
-    for _ in range(500):
-        note = rng.choice(bayati_scale)
-        # Add slight pitch variation (±15 cents) to simulate real performance
-        variation_cents = rng.normal(0, 15)
-        variation_factor = 2 ** (variation_cents / 1200)
-        freq = note.freq_hz * variation_factor
-        test_freqs.append(freq)
-        test_confs.append(rng.uniform(0.7, 1.0))
-
-    # Add some silence frames
-    test_freqs += [0.0] * 50
-    test_confs += [0.0] * 50
-
-    print("Simulated: Bayati on D with ±15 cent variation + 10% silence\n")
-    results = detect_maqam(test_freqs, test_confs)
-
-    for i, c in enumerate(results):
-        print(f"  #{i + 1}: {c.name}")
-        print(f"        score={c.score:.4f}, tonic_detected={c.tonic_detected}")
-        print(f"        matched: {c.matched_degrees}")
-        print()
-
-    # Test Rast
-    print("─" * 50)
-    rast_scale = build_scale("Rast on C")
-    test_freqs2 = []
-    test_confs2 = []
-    for _ in range(500):
-        note = rng.choice(rast_scale)
-        variation_cents = rng.normal(0, 15)
-        freq = note.freq_hz * (2 ** (variation_cents / 1200))
-        test_freqs2.append(freq)
-        test_confs2.append(rng.uniform(0.7, 1.0))
-
-    print("\nSimulated: Rast on C with ±15 cent variation\n")
-    results2 = detect_maqam(test_freqs2, test_confs2)
-    for i, c in enumerate(results2):
-        print(f"  #{i + 1}: {c.name}")
-        print(f"        score={c.score:.4f}, tonic_detected={c.tonic_detected}")
-        print()
