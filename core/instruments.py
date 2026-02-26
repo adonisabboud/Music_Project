@@ -12,6 +12,10 @@ from dataclasses import dataclass
 
 @dataclass
 class InstrumentProfile:
+    """
+    Configuration for a specific instrument's frequency range.
+    Used to constrain the pitch search space.
+    """
     name: str
     display_name: str
     fmin: float
