@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from core.audio_loader import load_audio, get_duration
+from core.audio_loader import load_audio, get_duration, save_debug_audio
 from core.pitch_extractor import extract_pitch_penn, segment_notes_sota
 from core.maqam_detector import detect_maqam_with_consistency, extract_tuning_peaks_kde
 from core.tuning import (
@@ -29,19 +29,11 @@ def transcribe(
     maqam_override: str = None,
     instrument: str = "general",
     time_signature: tuple = (4, 4),
+    save_cleaned_audio: bool = False,
     verbose: bool = True,
 ) -> dict:
     """
     Main Entry Point: SOTA transcription pipeline.
-    
-    Orchestrates the following steps:
-    1. Audio Loading & Preprocessing.
-    2. Neural Pitch Extraction with integrated Viterbi Octave Correction.
-    3. Tuning-Invariant Maqam Detection.
-    4. Dynamic Tuning Calibration.
-    5. Note Segmentation.
-    6. Rhythm Quantization.
-    7. MusicXML Export.
     """
 
     def log(msg):
@@ -50,21 +42,24 @@ def transcribe(
 
     # ── Step 1: Load audio & Pre-process ──────────────────────────────
     log(f"\n{'='*60}")
-    log(f"  Arabic Music Transcriber (SOTA Engine)")
+    log(f"  Arabic Music Transcriber")
     log(f"{'='*60}")
     log(f"\n[1/7] Loading and cleaning audio: {audio_path}")
 
-    y, sr = load_audio(audio_path, isolate_melody=True)
+    y, sr = load_audio(audio_path)
     duration = get_duration(y, sr)
     log(f"      Duration: {duration:.1f}s, Sample rate: {sr}Hz")
-    log(f"      Applied spectral denoising and HPSS.")
 
-    # ── Step 2: Pitch extraction (Custom Viterbi Decoder) ───────────────
+    if save_cleaned_audio:
+        debug_path = Path("output") / f"cleaned_{Path(audio_path).stem}.wav"
+        save_debug_audio(y, sr, debug_path)
+        log(f"      Saved cleaned audio for debugging: {debug_path}")
+
+    # ── Step 2: Pitch extraction (Argmax + Median Filter) ───────────────
     fmin, fmax = get_instrument_range(instrument)
-    log(f"\n[2/7] Extracting pitch with custom Viterbi decoder...")
+    log(f"\n[2/7] Extracting pitch with Argmax + Median Filter...")
     log(f"      Instrument: {instrument} (range: {fmin:.0f}-{fmax:.0f} Hz)")
 
-    # This function now contains the integrated octave correction logic
     track = extract_pitch_penn(y, sr=sr, fmin=fmin, fmax=fmax)
     log(f"      Voiced frames: {track.voiced_mask.sum() / len(track.voiced_mask):.1%}")
     
@@ -74,7 +69,6 @@ def transcribe(
     if maqam_override:
         log(f"      Override provided: {maqam_override}")
         maqam_name = maqam_override
-        tuning_offset = 0.0
     else:
         candidates = detect_maqam_with_consistency(list(track.frequencies), list(track.confidences))
         best_cand = candidates[0] if candidates else None
@@ -84,26 +78,20 @@ def transcribe(
             log(f"      Detected: {maqam_name} (Tuning: {tuning_offset:+.1f} cents)")
         else:
             maqam_name = "Rast on C"
-            tuning_offset = 0.0
             log(f"      Detection failed, falling back to {maqam_name}")
 
     # ── Step 4: Dynamic Tuning Calibration ──────────────────────────────
     log(f"\n[4/7] Calibrating scale to performer's intonation...")
     
-    # Build the theoretical scale
     raw_scale = build_scale(maqam_name)
-    
-    # Get the actual performed peaks
     peaks_cents, _, _ = extract_tuning_peaks_kde(list(track.frequencies), list(track.confidences))
-    
-    # Bend the scale to match the performer
     scale = calibrate_scale_to_performer(raw_scale, peaks_cents)
     log(f"      Scale calibrated using {len(peaks_cents)} detected pitch peaks.")
 
-    # ── Step 5: Note Segmentation (Velocity + Onsets) ───────────────────
-    log(f"\n[5/7] Segmenting notes (Glissando-aware)...")
+    # ── Step 5: Note Segmentation (Islands and Anchors) ───────────────────
+    log(f"\n[5/7] Segmenting notes (Islands and Anchors)...")
     
-    raw_segments = segment_notes_sota(track, y)
+    raw_segments = segment_notes_sota(track)
     log(f"      Main notes detected: {len(raw_segments)}")
 
     # ── Step 6: Tuning & Rhythm Quantization ────────────────────────────
@@ -212,19 +200,11 @@ def main():
     )
     parser.add_argument("audio", help="Input audio file")
     parser.add_argument("--output", "-o", default="output.xml", help="Output MusicXML file")
-
-    # Kept for compatibility, though we default to SOTA now
-    parser.add_argument("--pipeline", "-p", default="full", choices=["mvp", "full"],
-                        help="Pipeline mode (ignored in this version)")
-
-    parser.add_argument("--mode", "-M", default="auto", choices=["auto", "metered", "taksim"],
-                        help="Rhythm mode (ignored in this version)")
     parser.add_argument("--maqam", "-m", default=None, help="Override maqam")
-    parser.add_argument("--iqa", default=None, help="Override iqa' (ignored in this version)")
     parser.add_argument("--instrument", "-i", default="general", choices=list(INSTRUMENTS.keys()), help="Instrument type")
-    parser.add_argument("--bpm", "-b", type=float, default=None, help="Override tempo (ignored in this version)")
     parser.add_argument("--time-sig", "-t", default="4/4", help="Time signature")
     parser.add_argument("--quiet", "-q", action="store_true", help="Suppress output")
+    parser.add_argument("--save-cleaned-audio", action="store_true", help="Save the pre-processed audio to output/ for debugging.")
 
     args = parser.parse_args()
 
@@ -241,6 +221,7 @@ def main():
         maqam_override=args.maqam,
         instrument=args.instrument,
         time_signature=time_sig,
+        save_cleaned_audio=args.save_cleaned_audio,
         verbose=not args.quiet,
     )
     print(f"\nSummary:")
