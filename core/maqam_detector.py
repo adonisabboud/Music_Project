@@ -19,7 +19,7 @@ import numpy as np
 from numpy.fft import rfft, irfft
 from scipy.signal import find_peaks
 from scipy.stats import gaussian_kde
-
+from .config import PITCH_EXTRACTION
 from .tuning import (
     MAQAM,
     OCT,
@@ -82,6 +82,7 @@ def detect_maqam_sota(
 ) -> list[MaqamCandidate]:
     """
     Detects Maqam using tuning-invariant cross-correlation.
+    Clamped to +/- 100 cents to prevent extreme transposition hallucinations.
     """
     if confidences is None:
         confidences = [1.0] * len(frequencies)
@@ -89,11 +90,16 @@ def detect_maqam_sota(
     _, _, audio_fp = extract_tuning_peaks_kde(frequencies, confidences)
     if np.sum(audio_fp) == 0:
         return []
-    
+
     audio_fp /= np.sum(audio_fp)
     audio_fft = rfft(audio_fp)
-    
+
     candidates = []
+
+    # ── THE FIX: Clamp the search window to +/- 100 cents ──
+    max_drift = 100
+    # valid_indices represents 0 to +100 cents, and -100 to 0 cents (1100 to 1199)
+    valid_indices = list(range(max_drift + 1)) + list(range(1200 - max_drift, 1200))
 
     for maqam_name, m in MAQAM.items():
         for upper_j in m.upper_options:
@@ -102,16 +108,18 @@ def detect_maqam_sota(
             maqam_fft = rfft(maqam_fp)
             cross_corr = irfft(audio_fft * np.conj(maqam_fft))
 
-            score = np.max(cross_corr)
-            offset_cents = np.argmax(cross_corr)
-            
+            # Only look for the highest correlation score within our realistic tuning bounds
+            best_idx = valid_indices[np.argmax(cross_corr[valid_indices])]
+            score = cross_corr[best_idx]
+
+            offset_cents = best_idx
             if offset_cents > 600:
                 offset_cents -= 1200
 
             name = f"{maqam_name} (upper {upper_j})" if upper_j != m.upper_default else maqam_name
 
             candidates.append(MaqamCandidate(
-                name=name, 
+                name=name,
                 score=score,
                 tuning_offset_cents=float(offset_cents),
                 scale=scale
@@ -128,11 +136,15 @@ def detect_maqam_sota(
 def extract_tuning_peaks_kde(
         frequencies: list[float],
         confidences: list[float],
-        min_conf: float = 0.5
+        min_conf: float = None  # <--- THE FIX: Default to None
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     SOTA Dynamic Tuning using Kernel Density Estimation (KDE).
     """
+    # Dynamically pull the exact threshold from config so it never starves!
+    if min_conf is None:
+        min_conf = PITCH_EXTRACTION['confidence_threshold']
+
     valid_idx = [i for i, (f, c) in enumerate(zip(frequencies, confidences)) if f > 0 and c > min_conf]
     if not valid_idx:
         return np.array([]), np.array([]), np.zeros(1200)
@@ -150,11 +162,14 @@ def extract_tuning_peaks_kde(
 
     x_grid = np.arange(1200)
     kde_curve = kde(x_grid)
-    
+
+    # --- ADD THIS NORMALIZATION FIX ---
+    if np.max(kde_curve) > 0:
+        kde_curve = kde_curve / np.max(kde_curve)
+
     peaks, _ = find_peaks(kde_curve, distance=35, prominence=0.05)
 
     return peaks, kde_curve[peaks], kde_curve
-
 
 def detect_maqam_with_consistency(
         frequencies: list[float],
