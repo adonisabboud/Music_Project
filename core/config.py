@@ -9,7 +9,7 @@ PITCH_EXTRACTION = {
     'fmin': 50.0,                 # Min freq (low Oud G is ~78Hz)
     'fmax': 1600.0,               # Max freq (high Nay/Violin register)
     'decoder': 'argmax',          # Use 'argmax' for speed, as post-processing handles smoothing
-    'confidence_threshold': 0.10, # The minimum confidence to consider a frame "voiced"
+    'confidence_threshold': 0.35, # The minimum confidence to consider a frame "voiced"
     'device': 'auto',             # 'cuda', 'cpu', or 'auto'
 }
 

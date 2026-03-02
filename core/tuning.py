@@ -59,137 +59,6 @@ MICRO = {
     "Hijaz_E_quarter": PC["D"] + 15.0,                  # 24.0
 }
 
-# ──────────────────────────────────────────────
-# Iqa'at (Arabic Rhythmic Cycles)
-# ──────────────────────────────────────────────
-
-IQA_AT = {
-    "taksim": {
-        "name": "Taksim (Free Rhythm)",
-        "type": "free",           # Special type for unmetered sections
-        "description": "Improvisational, non-metric section",
-        "beats": None,            # No fixed beats
-        "time_signature": None,    # No fixed time signature
-        "pattern": [],             # No rhythmic pattern
-        "typical_duration": "variable",  # Can be any length
-    },
-    "maqsum": {
-        "name": "Maqsum",
-        "type": "metered",
-        "pattern": [2, 2, 2, 2, 2, 2, 2, 2],  # 4/4 with specific accents
-        "beats": 8,
-        "time_signature": (4, 4),
-        "dum_tek": ["D", "T", "D", "T", "T", "D", "T", "T"],
-        "description": "Most common 4/4 rhythm",
-    },
-    "wahda": {
-        "name": "Wahda",
-        "type": "metered",
-        "pattern": [4, 4],  # 4/4
-        "beats": 8,
-        "time_signature": (4, 4),
-        "description": "Simple 4/4 rhythm",
-    },
-    "sama'i": {
-        "name": "Sama'i Thaqil",
-        "type": "metered",
-        "pattern": [3, 3, 3, 4],  # 10/8
-        "beats": 10,
-        "time_signature": (10, 8),
-        "description": "10/8 rhythm common in instrumental forms",
-    },
-    "masmoudi": {
-        "name": "Masmoudi Kabir",
-        "type": "metered",
-        "pattern": [2, 2, 2, 2, 2, 2],  # 4/4
-        "beats": 8,
-        "time_signature": (4, 4),
-        "description": "Heavy 4/4 rhythm",
-    },
-    "ayoub": {
-        "name": "Ayoub",
-        "type": "metered",
-        "pattern": [3, 3],  # 3/4
-        "beats": 6,
-        "time_signature": (3, 4),
-        "description": "3/4 rhythm often used in religious music",
-    },
-    "darij": {
-        "name": "Darij",
-        "type": "metered",
-        "pattern": [3, 2, 2],  # 7/8
-        "beats": 7,
-        "time_signature": (7, 8),
-        "description": "7/8 rhythm common in folk music",
-    },
-    "malfuf": {
-        "name": "Malfuf",
-        "type": "metered",
-        "pattern": [2, 2, 2, 2],  # 2/4
-        "beats": 4,
-        "time_signature": (2, 4),
-        "description": "Fast 2/4 rhythm",
-    },
-    "jerk": {
-        "name": "Jerk",
-        "type": "metered",
-        "pattern": [3, 3, 2],  # 8/8
-        "beats": 8,
-        "time_signature": (8, 8),
-        "description": "8/8 rhythm with asymmetrical pattern",
-    },
-    "samai_darij": {
-        "name": "Sama'i Darij",
-        "type": "metered",
-        "pattern": [3, 3, 4],  # 10/8 (alternative pattern)
-        "beats": 10,
-        "time_signature": (10, 8),
-        "description": "10/8 rhythm variant",
-    },
-}
-
-def detect_rhythm_type(segments: list) -> str:
-    """
-    Detect if a section is taksim (free rhythm) or metered.
-    Useful for separating improvisational sections.
-    """
-    if len(segments) < 10:
-        return "taksim"  # Short sections are often taksim
-    
-    # Calculate rhythm regularity
-    durations = [s["duration_sec"] for s in segments if s["duration_sec"] > 0.05]
-    if len(durations) < 5:
-        return "taksim"
-    
-    # Check for repetitive patterns
-    cv = np.std(durations) / np.mean(durations)  # Coefficient of variation
-    if cv > 0.8:  # High variation indicates free rhythm
-        return "taksim"
-    
-    # Try to detect specific iqa'at patterns
-    # Normalize durations to find common patterns
-    min_dur = min(durations)
-    norm_durs = [round(d / min_dur) for d in durations]
-    
-    # Look for repeating patterns of length 4-8
-    for pattern_len in [4, 6, 8, 10]:
-        if len(norm_durs) >= pattern_len * 2:
-            pattern = norm_durs[:pattern_len]
-            # Check if pattern repeats
-            next_pattern = norm_durs[pattern_len:pattern_len*2]
-            if pattern == next_pattern:
-                # Found repeating pattern
-                pattern_sum = sum(pattern)
-                for iqa_name, iqa in IQA_AT.items():
-                    if iqa["type"] == "metered" and iqa.get("pattern"):
-                        if len(iqa["pattern"]) == pattern_len and sum(iqa["pattern"]) == pattern_sum:
-                            # Check if patterns match closely
-                            match = all(abs(p1 - p2) <= 1 for p1, p2 in zip(pattern, iqa["pattern"]))
-                            if match:
-                                return iqa_name
-                return "metered_unknown"
-    
-    return "taksim" if cv > 0.6 else "metered_unknown"
 
 # ──────────────────────────────────────────────
 # Frequency ↔ Comma conversion
@@ -552,16 +421,19 @@ def calibrate_scale_to_performer(scale: list['ScaleNote'], peaks_cents: np.ndarr
                 min_dist = dist
                 closest_peak = peak
 
-        # 3. Apply the human tuning offset
-        if closest_peak is not None:
-            # Find the signed difference to shift the note
-            diff = closest_peak - theoretical_cents
-            if diff > 600: diff -= 1200
-            if diff < -600: diff += 1200
+                # 3. Apply the human tuning offset
+                if closest_peak is not None:
+                    diff = closest_peak - theoretical_cents
+                    if diff > 600: diff -= 1200
+                    if diff < -600: diff += 1200
 
-            # Shift the exact frequency of this scale degree
-            note.freq_hz = note.freq_hz * (2 ** (diff / 1200.0))
-            # We also update a debug label so we can see the offset
-            note.label = f"{note.label} ({diff:+.1f}c)"
+                    # Shift the exact frequency of this scale degree
+                    note.freq_hz = note.freq_hz * (2 ** (diff / 1200.0))
+
+                    # --- THE FIX: Update the comma math so the quantizer sees the shift! ---
+                    note.abs_commas = freq_to_commas(note.freq_hz)
+
+                    # We also update a debug label so we can see the offset
+                    note.label = f"{note.label} ({diff:+.1f}c)"
 
     return calibrated_scale

@@ -16,7 +16,7 @@ from core.pitch_extractor import extract_pitch_penn, segment_notes_sota
 from core.maqam_detector import detect_maqam_with_consistency, extract_tuning_peaks_kde
 from core.tuning import (
     build_scale, quantize_to_maqam, get_quantization_error_cents, MAQAM,
-    calibrate_scale_to_performer
+    calibrate_scale_to_performer, freq_to_commas
 )
 from core.instruments import get_instrument_range, INSTRUMENTS
 from output.musicxml_exporter import export_musicxml
@@ -56,35 +56,61 @@ def transcribe(
         log(f"      Saved cleaned audio for debugging: {debug_path}")
 
     # ── Step 2: Pitch extraction (Argmax + Median Filter) ───────────────
+    import numpy as np
     fmin, fmax = get_instrument_range(instrument)
     log(f"\n[2/7] Extracting pitch with Argmax + Median Filter...")
     log(f"      Instrument: {instrument} (range: {fmin:.0f}-{fmax:.0f} Hz)")
 
     track = extract_pitch_penn(y, sr=sr, fmin=fmin, fmax=fmax)
     log(f"      Voiced frames: {track.voiced_mask.sum() / len(track.voiced_mask):.1%}")
-    
+
+    # --- THE MATH X-RAY ---
+    confs = track.confidences
+    log(f"      Confidence Stats -> Min: {np.min(confs):.3f} | Median: {np.median(confs):.3f} | Max: {np.max(confs):.3f}")
+    # ----------------------
+
     # ── Step 3: Maqam Detection (Tuning-Invariant) ──────────────────────
     log(f"\n[3/7] Detecting Maqam (Tuning-Invariant)...")
 
+    # 1. We ALWAYS run the detector to find the performer's global flat/sharp offset
+    candidates = detect_maqam_with_consistency(list(track.frequencies), list(track.confidences))
+    tuning_offset = candidates[0].tuning_offset_cents if candidates else 0.0
+
+    # 2. Determine the Maqam name
     if maqam_override:
         log(f"      Override provided: {maqam_override}")
         maqam_name = maqam_override
     else:
-        candidates = detect_maqam_with_consistency(list(track.frequencies), list(track.confidences))
-        best_cand = candidates[0] if candidates else None
-        if best_cand:
+        if candidates:
+            best_cand = candidates[0]
             maqam_name = best_cand.name
-            tuning_offset = best_cand.tuning_offset_cents
             log(f"      Detected: {maqam_name} (Tuning: {tuning_offset:+.1f} cents)")
         else:
             maqam_name = "Rast on C"
             log(f"      Detection failed, falling back to {maqam_name}")
 
+    # 3. Build the theoretical scale
+        # 3. Build the theoretical scale (Strip out modulation tags so the dict doesn't crash!)
+        base_maqam_name = maqam_name.split(" (")[0]
+        raw_scale = build_scale(base_maqam_name)
+
+    # 4. --- THE GLOBAL TUNING FIX ---
+    # Shift the ENTIRE grid by the performer's overall flat/sharp offset
+    for note in raw_scale:
+        note.freq_hz = note.freq_hz * (2 ** (tuning_offset / 1200.0))
+        note.abs_commas = freq_to_commas(note.freq_hz)
+
+    log(f"      Global grid shifted by {tuning_offset:+.1f} cents to match performer")
+
     # ── Step 4: Dynamic Tuning Calibration ──────────────────────────────
     log(f"\n[4/7] Calibrating scale to performer's intonation...")
-    
-    raw_scale = build_scale(maqam_name)
+
     peaks_cents, _, _ = extract_tuning_peaks_kde(list(track.frequencies), list(track.confidences))
+
+    # --- THE X-RAY: Show us the exact pitch peaks the musician played! ---
+    log(f"      Raw Audio Peaks (cents): {[round(p, 1) for p in peaks_cents]}")
+    # ---------------------------------------------------------------------
+
     scale = calibrate_scale_to_performer(raw_scale, peaks_cents)
     log(f"      Scale calibrated using {len(peaks_cents)} detected pitch peaks.")
 
