@@ -18,11 +18,12 @@ TARGET_SR = 16000   # Hz — Native rate for PENN pitch extraction
 
 
 def load_audio(
-    path: str | Path, 
-    target_sr: int = TARGET_SR, 
+    path: str | Path,
+    target_sr: int = TARGET_SR,
 ) -> tuple[np.ndarray, int]:
     """
     Load an audio file and return a pre-processed (audio_array, sample_rate).
+    Applies gentle stationary noise reduction before returning.
     """
     path = Path(path)
     if not path.exists():
@@ -43,8 +44,13 @@ def load_audio(
         except Exception as e2:
             raise RuntimeError(f"Failed to load {path} with both librosa and pydub. Error: {e2}")
 
+    # Gentle stationary noise reduction — preserves musical transients,
+    # reduces mic/room hiss that can create spurious low-confidence voiced frames.
+    # prop_decrease=0.75: attenuates noise 75% rather than eliminating it, avoiding
+    # musical artefacts while giving the pitch tracker a cleaner signal.
+    y = nr.reduce_noise(y=y, sr=sr, stationary=True, prop_decrease=0.75)
 
-    # 2. Normalize amplitude
+    # Normalize amplitude
     peak = np.abs(y).max()
     if peak > 0:
         y = y / peak

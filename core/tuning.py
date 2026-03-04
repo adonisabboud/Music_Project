@@ -319,14 +319,6 @@ if __name__ == "__main__":
     for n in scale:
         print(f"  {n.label:20s} {n.abs_commas:5.1f}c  {n.freq_hz:.2f} Hz")
 
-    print("\nIqa'at (Rhythmic Cycles):")
-    for name, iqa in IQA_AT.items():
-        if iqa["type"] == "free":
-            print(f"  {name:15s} - {iqa['name']} ({iqa['type']})")
-        else:
-            pattern_str = " ".join(str(p) for p in iqa["pattern"])
-            print(f"  {name:15s} - {iqa['name']} [{pattern_str}] {iqa['time_signature']}")
-
     print("\nQuantization test (318.22 Hz → should be Eb½ Rast):")
     scale = build_scale("Rast on C")
     result = quantize_to_maqam(318.22, scale)
@@ -421,19 +413,19 @@ def calibrate_scale_to_performer(scale: list['ScaleNote'], peaks_cents: np.ndarr
                 min_dist = dist
                 closest_peak = peak
 
-                # 3. Apply the human tuning offset
-                if closest_peak is not None:
-                    diff = closest_peak - theoretical_cents
-                    if diff > 600: diff -= 1200
-                    if diff < -600: diff += 1200
+        # 3. Apply the human tuning offset once, after the best peak is found
+        if closest_peak is not None:
+            diff = closest_peak - theoretical_cents
+            if diff > 600: diff -= 1200
+            if diff < -600: diff += 1200
 
-                    # Shift the exact frequency of this scale degree
-                    note.freq_hz = note.freq_hz * (2 ** (diff / 1200.0))
+            # Shift the exact frequency of this scale degree
+            note.freq_hz = note.freq_hz * (2 ** (diff / 1200.0))
 
-                    # --- THE FIX: Update the comma math so the quantizer sees the shift! ---
-                    note.abs_commas = freq_to_commas(note.freq_hz)
+            # Update the comma math so the quantizer sees the shift
+            note.abs_commas = freq_to_commas(note.freq_hz)
 
-                    # We also update a debug label so we can see the offset
-                    note.label = f"{note.label} ({diff:+.1f}c)"
+            # Update label to show the offset for debugging
+            note.label = f"{note.label} ({diff:+.1f}c)"
 
     return calibrated_scale

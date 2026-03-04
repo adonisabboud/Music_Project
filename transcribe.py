@@ -9,11 +9,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).parent))
 
 from core.audio_loader import load_audio, get_duration, save_debug_audio
 from core.pitch_extractor import extract_pitch_penn, segment_notes_sota
-from core.maqam_detector import detect_maqam_with_consistency, extract_tuning_peaks_kde
+from core.maqam_detector import detect_maqam_with_consistency, extract_tuning_peaks_kde, detect_tonic
 from core.tuning import (
     build_scale, quantize_to_maqam, get_quantization_error_cents, MAQAM,
     calibrate_scale_to_performer, freq_to_commas
@@ -56,7 +58,6 @@ def transcribe(
         log(f"      Saved cleaned audio for debugging: {debug_path}")
 
     # ── Step 2: Pitch extraction (Argmax + Median Filter) ───────────────
-    import numpy as np
     fmin, fmax = get_instrument_range(instrument)
     log(f"\n[2/7] Extracting pitch with Argmax + Median Filter...")
     log(f"      Instrument: {instrument} (range: {fmin:.0f}-{fmax:.0f} Hz)")
@@ -72,9 +73,19 @@ def transcribe(
     # ── Step 3: Maqam Detection (Tuning-Invariant) ──────────────────────
     log(f"\n[3/7] Detecting Maqam (Tuning-Invariant)...")
 
+    hop_sec = track.hop_size / track.sample_rate
+
     # 1. We ALWAYS run the detector to find the performer's global flat/sharp offset
-    candidates = detect_maqam_with_consistency(list(track.frequencies), list(track.confidences))
+    candidates = detect_maqam_with_consistency(
+        list(track.frequencies),
+        list(track.confidences),
+        hop_size_sec=hop_sec,
+    )
     tuning_offset = candidates[0].tuning_offset_cents if candidates else 0.0
+
+    tonic_hz, tonic_conf = detect_tonic(list(track.frequencies), list(track.confidences), hop_sec)
+    if tonic_hz > 0.0:
+        log(f"      Tonic estimate: {tonic_hz:.1f} Hz (confidence {tonic_conf:.2f})")
 
     # 2. Determine the Maqam name
     if maqam_override:
@@ -89,10 +100,9 @@ def transcribe(
             maqam_name = "Rast on C"
             log(f"      Detection failed, falling back to {maqam_name}")
 
-    # 3. Build the theoretical scale
-        # 3. Build the theoretical scale (Strip out modulation tags so the dict doesn't crash!)
-        base_maqam_name = maqam_name.split(" (")[0]
-        raw_scale = build_scale(base_maqam_name)
+    # 3. Build the theoretical scale (strip modulation tags so the dict key matches)
+    base_maqam_name = maqam_name.split(" (")[0]
+    raw_scale = build_scale(base_maqam_name)
 
     # 4. --- THE GLOBAL TUNING FIX ---
     # Shift the ENTIRE grid by the performer's overall flat/sharp offset

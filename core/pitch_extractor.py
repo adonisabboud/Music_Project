@@ -60,8 +60,16 @@ def extract_pitch_penn(y, sr=16000, fmin=None, fmax=None):
     raw_pitch_hz = raw_pitch_hz.squeeze().cpu().numpy()
     periodicity = periodicity.squeeze().cpu().numpy()
 
-    # 2. Crush onset spikes with a median filter
-    cleaned_pitch_hz = medfilt(raw_pitch_hz, kernel_size=11)
+    # 2. Crush onset spikes with a median filter.
+    # Fill unvoiced (zero) frames with interpolated values first so they don't
+    # pull voiced frames near silence toward zero, then restore zeros after.
+    voiced_mask = raw_pitch_hz > 0
+    if voiced_mask.any():
+        idx = np.arange(len(raw_pitch_hz))
+        fill = np.interp(idx, idx[voiced_mask], raw_pitch_hz[voiced_mask])
+    else:
+        fill = raw_pitch_hz.copy()
+    cleaned_pitch_hz = medfilt(fill, kernel_size=11)
 
     # 3. Zero out the unvoiced frames
     cleaned_pitch_hz[periodicity < PITCH_EXTRACTION['confidence_threshold']] = 0.0

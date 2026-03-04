@@ -7,7 +7,7 @@
     <work-title>Ansak</work-title>
   </work>
   <identification>
-    <rights>Maqam: Bayati on D (upper Nahawand)</rights>
+    <rights>Maqam: Rast on C (upper Nahawand)</rights>
     <encoding>
       <software>Arabic Transcriber (SOTA Engine)</software>
     </encoding>
@@ -42,7 +42,7 @@
       </direction>
       <direction placement="above">
         <direction-type>
-          <words font-style="italic" font-weight="bold" default-y="20">Maqam: Bayati on D (upper Nahawand)</words>
+          <words font-style="italic" font-weight="bold" default-y="20">Maqam: Rast on C (upper Nahawand)</words>
         </direction-type>
       </direction>
       <note>
@@ -76,19 +76,9 @@
       <note>
         <grace slash="yes"/>
         <pitch>
-          <step>E</step>
-          <alter>-1.0</alter>
-          <octave>4</octave>
-        </pitch>
-        <type>16th</type>
-        <accidental>flat</accidental>
-      </note>
-      <note>
-        <pitch>
           <step>F</step>
           <octave>4</octave>
         </pitch>
-        <duration>4</duration>
         <type>16th</type>
         <accidental>natural</accidental>
       </note>
@@ -102,12 +92,21 @@
         <accidental>natural</accidental>
       </note>
       <note>
-        <grace slash="yes"/>
+        <pitch>
+          <step>F</step>
+          <octave>4</octave>
+        </pitch>
+        <duration>4</duration>
+        <type>16th</type>
+        <accidental>natural</accidental>
+      </note>
+      <note>
         <pitch>
           <step>B</step>
           <alter>-1.0</alter>
           <octave>5</octave>
         </pitch>
+        <duration>4</duration>
         <type>16th</type>
         <accidental>flat</accidental>
       </note>
@@ -141,6 +140,15 @@
         <accidental>flat</accidental>
       </note>
       <note>
+        <grace slash="yes"/>
+        <pitch>
+          <step>F</step>
+          <octave>4</octave>
+        </pitch>
+        <type>16th</type>
+        <accidental>natural</accidental>
+      </note>
+      <note>
         <pitch>
           <step>F</step>
           <octave>4</octave>
@@ -150,11 +158,11 @@
         <accidental>natural</accidental>
       </note>
       <note>
-        <grace slash="yes"/>
         <pitch>
-          <step>F</step>
+          <step>G</step>
           <octave>4</octave>
         </pitch>
+        <duration>4</duration>
         <type>16th</type>
         <accidental>natural</accidental>
       </note>
@@ -171,7 +179,7 @@
         <grace slash="yes"/>
         <pitch>
           <step>A</step>
-          <octave>4</octave>
+          <octave>5</octave>
         </pitch>
         <type>16th</type>
         <accidental>natural</accidental>
@@ -181,17 +189,8 @@
           <step>A</step>
           <octave>4</octave>
         </pitch>
-        <duration>4</duration>
-        <type>16th</type>
-        <accidental>natural</accidental>
-      </note>
-      <note>
-        <pitch>
-          <step>A</step>
-          <octave>4</octave>
-        </pitch>
-        <duration>4</duration>
-        <type>16th</type>
+        <duration>16</duration>
+        <type>quarter</type>
         <accidental>natural</accidental>
       </note>
       <note>
@@ -207,20 +206,12 @@
       <note>
         <grace slash="yes"/>
         <pitch>
-          <step>A</step>
+          <step>B</step>
+          <alter>-1.0</alter>
           <octave>3</octave>
         </pitch>
         <type>16th</type>
-        <accidental>natural</accidental>
-      </note>
-      <note>
-        <pitch>
-          <step>D</step>
-          <octave>4</octave>
-        </pitch>
-        <duration>4</duration>
-        <type>16th</type>
-        <accidental>natural</accidental>
+        <accidental>flat</accidental>
       </note>
       <note>
         <pitch>
@@ -240,44 +231,36 @@
         <duration>4</duration>
         <type>16th</type>
         <accidental>flat</accidental>
-      </note>
-      <note>
-        <pitch>
-          <step>E</step>
-          <alter>-1.0</alter>
-          <octave>4</octave>
-        </pitch>
-        <duration>4</duration>
-        <type>16th</type>
-        <accidental>flat</accidental>
-      </note>
-      <note>
-        <pitch>
-          <step>D</step>
-          <octave>4</octave>
-        </pitch>
-        <duration>4</duration>
-        <type>16th</type>
-        <accidental>natural</accidental>
-      </note>
-      <note>
-        <pitch>
-          <step>D</step>
-          <octave>4</octave>
-        </pitch>
-        <duration>4</duration>
-        <type>16th</type>
-        <accidental>natural</accidental>
       </note>
     </measure>
     <measure number="2">
       <note>
         <pitch>
+          <step>E</step>
+          <alter>-1.0</alter>
+          <octave>4</octave>
+        </pitch>
+        <duration>4</duration>
+        <type>16th</type>
+        <accidental>flat</accidental>
+      </note>
+      <note>
+        <pitch>
           <step>D</step>
           <octave>4</octave>
         </pitch>
         <duration>4</duration>
         <type>16th</type>
+        <accidental>natural</accidental>
+      </note>
+      <note>
+        <pitch>
+          <step>D</step>
+          <octave>4</octave>
+        </pitch>
+        <duration>12</duration>
+        <type>eighth</type>
+        <dot/>
         <accidental>natural</accidental>
       </note>
       <note>
@@ -325,17 +308,9 @@
           <step>D</step>
           <octave>4</octave>
         </pitch>
-        <duration>16</duration>
-        <type>quarter</type>
-        <accidental>natural</accidental>
-      </note>
-      <note>
-        <grace slash="yes"/>
-        <pitch>
-          <step>D</step>
-          <octave>4</octave>
-        </pitch>
-        <type>16th</type>
+        <duration>12</duration>
+        <type>eighth</type>
+        <dot/>
         <accidental>natural</accidental>
       </note>
       <note>
@@ -348,73 +323,6 @@
         <accidental>natural</accidental>
       </note>
       <note>
-        <grace slash="yes"/>
-        <pitch>
-          <step>E</step>
-          <alter>-1.0</alter>
-          <octave>4</octave>
-        </pitch>
-        <type>16th</type>
-        <accidental>flat</accidental>
-      </note>
-      <note>
-        <grace slash="yes"/>
-        <pitch>
-          <step>E</step>
-          <alter>-1.0</alter>
-          <octave>4</octave>
-        </pitch>
-        <type>16th</type>
-        <accidental>flat</accidental>
-      </note>
-      <note>
-        <pitch>
-          <step>F</step>
-          <octave>4</octave>
-        </pitch>
-        <duration>4</duration>
-        <type>16th</type>
-        <accidental>natural</accidental>
-      </note>
-      <note>
-        <grace slash="yes"/>
-        <pitch>
-          <step>F</step>
-          <octave>4</octave>
-        </pitch>
-        <type>16th</type>
-        <accidental>natural</accidental>
-      </note>
-      <note>
-        <grace slash="yes"/>
-        <pitch>
-          <step>F</step>
-          <octave>4</octave>
-        </pitch>
-        <type>16th</type>
-        <accidental>natural</accidental>
-      </note>
-      <note>
-        <grace slash="yes"/>
-        <pitch>
-          <step>E</step>
-          <alter>-1.0</alter>
-          <octave>4</octave>
-        </pitch>
-        <type>16th</type>
-        <accidental>flat</accidental>
-      </note>
-      <note>
-        <pitch>
-          <step>E</step>
-          <alter>-1.0</alter>
-          <octave>4</octave>
-        </pitch>
-        <duration>4</duration>
-        <type>16th</type>
-        <accidental>flat</accidental>
-      </note>
-      <note>
         <pitch>
           <step>D</step>
           <octave>4</octave>
@@ -424,12 +332,12 @@
         <accidental>natural</accidental>
       </note>
       <note>
+        <grace slash="yes"/>
         <pitch>
           <step>E</step>
           <alter>-1.0</alter>
           <octave>4</octave>
         </pitch>
-        <duration>4</duration>
         <type>16th</type>
         <accidental>flat</accidental>
       </note>
@@ -456,6 +364,82 @@
       </note>
       <note>
         <pitch>
+          <step>F</step>
+          <octave>4</octave>
+        </pitch>
+        <duration>4</duration>
+        <type>16th</type>
+        <accidental>natural</accidental>
+      </note>
+      <note>
+        <grace slash="yes"/>
+        <pitch>
+          <step>E</step>
+          <alter>-1.0</alter>
+          <octave>4</octave>
+        </pitch>
+        <type>16th</type>
+        <accidental>flat</accidental>
+      </note>
+      <note>
+        <pitch>
+          <step>D</step>
+          <octave>4</octave>
+        </pitch>
+        <duration>4</duration>
+        <type>16th</type>
+        <accidental>natural</accidental>
+      </note>
+      <note>
+        <pitch>
+          <step>E</step>
+          <alter>-1.0</alter>
+          <octave>4</octave>
+        </pitch>
+        <duration>4</duration>
+        <type>16th</type>
+        <accidental>flat</accidental>
+      </note>
+      <note>
+        <pitch>
+          <step>D</step>
+          <octave>4</octave>
+        </pitch>
+        <duration>4</duration>
+        <type>16th</type>
+        <accidental>natural</accidental>
+      </note>
+      <note>
+        <pitch>
+          <step>E</step>
+          <alter>-1.0</alter>
+          <octave>4</octave>
+        </pitch>
+        <duration>4</duration>
+        <type>16th</type>
+        <accidental>flat</accidental>
+      </note>
+      <note>
+        <pitch>
+          <step>E</step>
+          <alter>-1.0</alter>
+          <octave>4</octave>
+        </pitch>
+        <duration>4</duration>
+        <type>16th</type>
+        <accidental>flat</accidental>
+      </note>
+      <note>
+        <pitch>
+          <step>F</step>
+          <octave>4</octave>
+        </pitch>
+        <duration>4</duration>
+        <type>16th</type>
+        <accidental>natural</accidental>
+      </note>
+      <note>
+        <pitch>
           <step>G</step>
           <octave>4</octave>
         </pitch>
@@ -483,6 +467,15 @@
       </note>
       <note>
         <pitch>
+          <step>F</step>
+          <octave>4</octave>
+        </pitch>
+        <duration>4</duration>
+        <type>16th</type>
+        <accidental>natural</accidental>
+      </note>
+      <note>
+        <pitch>
           <step>A</step>
           <octave>5</octave>
         </pitch>
@@ -491,31 +484,31 @@
         <accidental>natural</accidental>
       </note>
       <note>
-        <grace slash="yes"/>
         <pitch>
           <step>B</step>
           <alter>-1.0</alter>
           <octave>4</octave>
         </pitch>
+        <duration>4</duration>
         <type>16th</type>
         <accidental>flat</accidental>
       </note>
       <note>
-        <grace slash="yes"/>
         <pitch>
           <step>A</step>
           <octave>4</octave>
         </pitch>
+        <duration>4</duration>
         <type>16th</type>
         <accidental>natural</accidental>
       </note>
       <note>
-        <grace slash="yes"/>
         <pitch>
           <step>B</step>
           <alter>-1.0</alter>
-          <octave>3</octave>
+          <octave>4</octave>
         </pitch>
+        <duration>4</duration>
         <type>16th</type>
         <accidental>flat</accidental>
       </note>
@@ -548,6 +541,45 @@
         </pitch>
         <type>16th</type>
         <accidental>flat</accidental>
+      </note>
+      <note>
+        <grace slash="yes"/>
+        <pitch>
+          <step>B</step>
+          <alter>-1.0</alter>
+          <octave>3</octave>
+        </pitch>
+        <type>16th</type>
+        <accidental>flat</accidental>
+      </note>
+      <note>
+        <grace slash="yes"/>
+        <pitch>
+          <step>B</step>
+          <alter>-1.0</alter>
+          <octave>3</octave>
+        </pitch>
+        <type>16th</type>
+        <accidental>flat</accidental>
+      </note>
+      <note>
+        <pitch>
+          <step>B</step>
+          <alter>-1.0</alter>
+          <octave>4</octave>
+        </pitch>
+        <duration>4</duration>
+        <type>16th</type>
+        <accidental>flat</accidental>
+      </note>
+      <note>
+        <grace slash="yes"/>
+        <pitch>
+          <step>D</step>
+          <octave>4</octave>
+        </pitch>
+        <type>16th</type>
+        <accidental>natural</accidental>
       </note>
       <note>
         <pitch>
@@ -558,6 +590,8 @@
         <type>16th</type>
         <accidental>natural</accidental>
       </note>
+    </measure>
+    <measure number="4">
       <note>
         <grace slash="yes"/>
         <pitch>
@@ -588,12 +622,22 @@
         <accidental>natural</accidental>
       </note>
       <note>
+        <grace slash="yes"/>
         <pitch>
           <step>E</step>
           <alter>-1.0</alter>
           <octave>4</octave>
         </pitch>
-        <duration>4</duration>
+        <type>16th</type>
+        <accidental>flat</accidental>
+      </note>
+      <note>
+        <grace slash="yes"/>
+        <pitch>
+          <step>E</step>
+          <alter>-1.0</alter>
+          <octave>4</octave>
+        </pitch>
         <type>16th</type>
         <accidental>flat</accidental>
       </note>
@@ -619,12 +663,11 @@
       <note>
         <grace slash="yes"/>
         <pitch>
-          <step>E</step>
-          <alter>-1.0</alter>
+          <step>D</step>
           <octave>4</octave>
         </pitch>
         <type>16th</type>
-        <accidental>flat</accidental>
+        <accidental>natural</accidental>
       </note>
       <note>
         <grace slash="yes"/>
@@ -645,6 +688,24 @@
         <duration>4</duration>
         <type>16th</type>
         <accidental>flat</accidental>
+      </note>
+      <note>
+        <grace slash="yes"/>
+        <pitch>
+          <step>F</step>
+          <octave>4</octave>
+        </pitch>
+        <type>16th</type>
+        <accidental>natural</accidental>
+      </note>
+      <note>
+        <pitch>
+          <step>F</step>
+          <octave>4</octave>
+        </pitch>
+        <duration>4</duration>
+        <type>16th</type>
+        <accidental>natural</accidental>
       </note>
       <note>
         <pitch>
@@ -671,6 +732,15 @@
           <octave>3</octave>
         </pitch>
         <duration>4</duration>
+        <type>16th</type>
+        <accidental>natural</accidental>
+      </note>
+      <note>
+        <grace slash="yes"/>
+        <pitch>
+          <step>D</step>
+          <octave>4</octave>
+        </pitch>
         <type>16th</type>
         <accidental>natural</accidental>
       </note>

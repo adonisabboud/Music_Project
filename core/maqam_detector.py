@@ -11,20 +11,23 @@ the maqam from a pitch track. It works by:
    to recordings that are not tuned to a perfect A4=440Hz.
 """
 
+import logging
 import math
 from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
 from numpy.fft import rfft, irfft
+from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 from scipy.stats import gaussian_kde
-from .config import PITCH_EXTRACTION
+from .config import PITCH_EXTRACTION, MAQAM_DETECTION
 from .tuning import (
     MAQAM,
     OCT,
     build_scale,
     ScaleNote,
+    comma_to_freq,
 )
 
 # ──────────────────────────────────────────────
@@ -78,7 +81,8 @@ def _create_maqam_fingerprint(scale: list[ScaleNote], length: int = 1200) -> np.
 def detect_maqam_sota(
         frequencies: list[float],
         confidences: Optional[list[float]] = None,
-        top_n: int = 3
+        top_n: int = 3,
+        hop_size_sec: float = 0.01,
 ) -> list[MaqamCandidate]:
     """
     Detects Maqam using tuning-invariant cross-correlation.
@@ -86,6 +90,8 @@ def detect_maqam_sota(
     """
     if confidences is None:
         confidences = [1.0] * len(frequencies)
+
+    tonic_hz, tonic_confidence = detect_tonic(frequencies, confidences, hop_size_sec)
 
     _, _, audio_fp = extract_tuning_peaks_kde(frequencies, confidences)
     if np.sum(audio_fp) == 0:
@@ -129,6 +135,18 @@ def detect_maqam_sota(
     for c in candidates:
         c.score /= max_score
 
+    if tonic_hz > 0.0 and tonic_confidence >= MAQAM_DETECTION['tonic_confidence_threshold']:
+        for c in candidates:
+            base_name = c.name.split(" (upper")[0].strip()
+            if base_name not in MAQAM:
+                continue
+            candidate_tonic_hz = comma_to_freq(MAQAM[base_name].tonic_abs)
+            dist_cents = abs(1200.0 * math.log2(tonic_hz / candidate_tonic_hz))
+            if dist_cents > 600:
+                dist_cents = abs(dist_cents - 1200)  # correct for octave error
+            if dist_cents <= MAQAM_DETECTION['tonic_match_window_cents']:
+                c.score *= MAQAM_DETECTION['tonic_match_boost']
+
     candidates.sort(key=lambda c: c.score, reverse=True)
     return candidates[:top_n]
 
@@ -158,7 +176,7 @@ def extract_tuning_peaks_kde(
     cents_padded = np.concatenate([cents_folded - 1200, cents_folded, cents_folded + 1200])
     weights_padded = np.concatenate([valid_confs, valid_confs, valid_confs])
 
-    kde = gaussian_kde(cents_padded, weights=weights_padded, bw_method=0.02)
+    kde = gaussian_kde(cents_padded, weights=weights_padded, bw_method=MAQAM_DETECTION['kde_bandwidth'])
 
     x_grid = np.arange(1200)
     kde_curve = kde(x_grid)
@@ -171,11 +189,126 @@ def extract_tuning_peaks_kde(
 
     return peaks, kde_curve[peaks], kde_curve
 
+def detect_tonic(
+        frequencies: list[float],
+        confidences: list[float],
+        hop_size_sec: float,
+        min_conf: float = None,
+) -> tuple[float, float]:
+    """Returns (tonic_hz, tonic_confidence). Returns (0.0, 0.0) if detection fails."""
+    if min_conf is None:
+        min_conf = PITCH_EXTRACTION['confidence_threshold']
+
+    C4 = 261.63
+
+    voiced_idx = [i for i, (f, c) in enumerate(zip(frequencies, confidences))
+                  if f > 0 and c > min_conf]
+    if not voiced_idx:
+        return 0.0, 0.0
+
+    voiced_freqs = np.array([frequencies[i] for i in voiced_idx])
+    voiced_confs = np.array([confidences[i] for i in voiced_idx])
+    voiced_cents = 1200.0 * np.log2(voiced_freqs / C4)  # absolute, no folding
+
+    evidence_cents = []
+    evidence_weights = []
+    evidence_confs = []
+
+    voiced_mask = np.array([f > 0 and c > min_conf
+                            for f, c in zip(frequencies, confidences)])
+
+    # ── Evidence 1: Final held note (weight ×2.0) ──────────────────────
+    # In Arabic taksim, the finishing note IS the tonic.  Use a short window
+    # (~0.3 s) so we capture only the actual cadence note, not the melodic
+    # movement leading up to it.
+    final_window = max(3, int(0.3 / hop_size_sec))
+    last_voiced = voiced_idx[-final_window:]
+    if len(last_voiced) >= 3:
+        pf = np.array([frequencies[i] for i in last_voiced])
+        pc_ = np.array([confidences[i] for i in last_voiced])
+        ev1_freq = float(np.median(pf))
+        ev1_conf = float(np.mean(pc_))
+        evidence_cents.append(1200.0 * math.log2(ev1_freq / C4))
+        evidence_weights.append(2.0)
+        evidence_confs.append(ev1_conf)
+
+    # ── Evidence 2: Phrase-cadence notes (weight ×1.5) ─────────────────
+    # Only count cadences followed by a real silence (≥150 ms), which
+    # filters out ornamental micro-pauses between rapid notes.
+    min_silence_frames = max(1, int(0.15 / hop_size_sec))
+    phrase_end_freqs = []
+    i = 0
+    while i < len(voiced_mask) - 1:
+        if voiced_mask[i] and not voiced_mask[i + 1]:
+            # measure silence length
+            silence_end = i + 1
+            while silence_end < len(voiced_mask) and not voiced_mask[silence_end]:
+                silence_end += 1
+            if silence_end - i - 1 >= min_silence_frames:
+                block = [frequencies[j] for j in range(max(0, i - 4), i + 1)
+                         if voiced_mask[j]]
+                if len(block) >= 2:
+                    phrase_end_freqs.append(float(np.median(block)))
+            i = silence_end
+        else:
+            i += 1
+    if len(phrase_end_freqs) >= 3:
+        pef_cents = 1200.0 * np.log2(np.array(phrase_end_freqs) / C4)
+        ev2_cents = float(np.median(pef_cents))
+        evidence_cents.append(ev2_cents)
+        evidence_weights.append(1.5)
+        evidence_confs.append(0.7)
+
+    # ── Evidence 3: Histogram peak (weight ×0.3) ───────────────────────
+    # Most-played note ≠ tonic (e.g. D is prominent in Rast on C), so
+    # keep this as weak corroborating evidence only.
+    cent_min = float(voiced_cents.min())
+    cent_max = float(voiced_cents.max())
+    span = cent_max - cent_min
+    if span > 10:
+        n_bins = max(50, int(span / 10))
+        hist, bin_edges = np.histogram(voiced_cents, bins=n_bins,
+                                       weights=voiced_confs, density=False)
+        hist_smooth = gaussian_filter1d(hist.astype(float), sigma=3.0)
+        max_h = float(hist_smooth.max())
+        if max_h > 0:
+            peaks3, props3 = find_peaks(hist_smooth,
+                                        distance=20,
+                                        prominence=0.05 * max_h)
+            if len(peaks3) > 0:
+                top = peaks3[np.argmax(props3['prominences'])]
+                bin_center = (bin_edges[top] + bin_edges[top + 1]) / 2.0
+                prom_ratio = float(props3['prominences'].max()) / max_h
+                evidence_cents.append(bin_center)
+                evidence_weights.append(0.3)
+                evidence_confs.append(prom_ratio)
+
+    if not evidence_cents:
+        return 0.0, 0.0
+
+    # ── Combine: confidence×weight mean in cents space ──────────────────
+    total_w = sum(w * c for w, c in zip(evidence_weights, evidence_confs))
+    if total_w <= 0:
+        return 0.0, 0.0
+
+    combined_cents = sum(
+        cents * w * c
+        for cents, w, c in zip(evidence_cents, evidence_weights, evidence_confs)
+    ) / total_w
+    tonic_hz = C4 * (2.0 ** (combined_cents / 1200.0))
+    overall_conf = float(np.mean(evidence_confs))
+
+    logging.debug(f"[detect_tonic] tonic={tonic_hz:.1f}Hz conf={overall_conf:.3f} "
+                  f"evidence_cents={[round(e, 1) for e in evidence_cents]}")
+    return tonic_hz, overall_conf
+
+
 def detect_maqam_with_consistency(
         frequencies: list[float],
         confidences: Optional[list[float]] = None,
+        hop_size_sec: float = 0.01,
 ) -> list[MaqamCandidate]:
     """
     Main entry point for maqam detection.
     """
-    return detect_maqam_sota(frequencies, confidences, top_n=5)
+    return detect_maqam_sota(frequencies, confidences, top_n=5, hop_size_sec=hop_size_sec)

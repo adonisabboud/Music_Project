@@ -170,14 +170,6 @@ RHYTHMIC_VALUES = [
     Fraction(1, 16),   # sixteenth
 ]
 
-try:
-    from .tuning import IQA_AT
-except ImportError:
-    IQA_AT = {
-        "taksim": {"name": "Taksim (Free Rhythm)", "type": "free", "pattern": []},
-        "maqsum": {"name": "Maqsum", "type": "metered", "pattern": [2, 2, 2, 2, 2, 2, 2, 2]},
-    }
-
 def _nearest_rhythmic_value(beats: float, prefer_small: bool = True) -> Fraction:
     """Find the nearest clean standard rhythmic value."""
     best = Fraction(1, 16)

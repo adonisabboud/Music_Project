@@ -9,7 +9,7 @@ PITCH_EXTRACTION = {
     'fmin': 50.0,                 # Min freq (low Oud G is ~78Hz)
     'fmax': 1600.0,               # Max freq (high Nay/Violin register)
     'decoder': 'argmax',          # Use 'argmax' for speed, as post-processing handles smoothing
-    'confidence_threshold': 0.35, # The minimum confidence to consider a frame "voiced"
+    'confidence_threshold': 0.28, # The minimum confidence to consider a frame "voiced"
     'device': 'auto',             # 'cuda', 'cpu', or 'auto'
 }
 
@@ -25,7 +25,11 @@ SEGMENTATION = {
 MAQAM_DETECTION = {
     'match_window_cents': 45.0,   # Widened to 45c to forgive expressive intonation
     'micro_weight': 3.0,          # Microtonal notes are highly diagnostic
-    'kde_bandwidth': 0.1,         # Smoothing for the Dynamic Tuning histogram
+    'kde_bandwidth': 0.02,        # KDE bandwidth factor (× data std). 0.02 ≈ 10-cent resolution, sharp enough to separate adjacent maqam notes
+    'tonic_match_window_cents': 60.0,  # match radius; wide to absorb global tuning drift
+    'tonic_match_boost': 1.45,          # score multiplier for tonic-consistent candidates
+    'tonic_final_phrase_sec': 8.0,      # seconds from end counted as "cadence phrase"
+    'tonic_confidence_threshold': 0.45, # min confidence before boost is applied at all
 }
 
 # ─── Rhythm Quantization ──────────────────────────────────────────────
