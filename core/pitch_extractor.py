@@ -83,6 +83,61 @@ def extract_pitch_penn(y, sr=16000, fmin=None, fmax=None):
     )
 
 
+def correct_octave_jumps(segments: list[dict]) -> list[dict]:
+    """
+    Post-segmentation octave correction.
+    Detects notes that are an octave away from BOTH neighbors
+    and shifts them toward the global median pitch.
+    """
+    if len(segments) < 3:
+        return segments
+
+    freqs = np.array([s["median_freq"] for s in segments])
+    valid = freqs[freqs > 0]
+    if len(valid) == 0:
+        return segments
+    global_median = np.median(valid)
+
+    def _nearest_valid(idx, direction):
+        j = idx + direction
+        while 0 <= j < len(segments):
+            if segments[j]["median_freq"] > 0:
+                return segments[j]["median_freq"]
+            j += direction
+        return None
+
+    for i in range(len(segments)):
+        freq = segments[i]["median_freq"]
+        if freq <= 0:
+            continue
+
+        left = _nearest_valid(i, -1)
+        right = _nearest_valid(i, +1)
+
+        if left is None and right is None:
+            continue
+
+        left_off = abs(1200 * np.log2(freq / left)) if left else 0
+        right_off = abs(1200 * np.log2(freq / right)) if right else 0
+
+        if left and right:
+            is_jump = left_off > 600 and right_off > 600
+        elif left:
+            is_jump = left_off > 600
+        elif right:
+            is_jump = right_off > 600
+        else:
+            is_jump = False
+
+        if is_jump:
+            if freq > global_median:
+                segments[i]["median_freq"] = freq / 2.0
+            else:
+                segments[i]["median_freq"] = freq * 2.0
+
+    return segments
+
+
 def segment_notes_sota(track: PitchTrack):
     """
     Bulletproof 'Islands and Anchors' Segmentation.

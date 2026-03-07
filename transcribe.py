@@ -14,7 +14,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 
 from core.audio_loader import load_audio, get_duration, save_debug_audio
-from core.pitch_extractor import extract_pitch_penn, segment_notes_sota
+from core.pitch_extractor import extract_pitch_penn, segment_notes_sota, correct_octave_jumps
 from core.maqam_detector import detect_maqam_with_consistency, extract_tuning_peaks_kde, detect_tonic
 from core.tuning import (
     build_scale, quantize_to_maqam, get_quantization_error_cents, MAQAM,
@@ -128,7 +128,9 @@ def transcribe(
     log(f"\n[5/7] Segmenting notes (Islands and Anchors)...")
     
     raw_segments = segment_notes_sota(track)
-    log(f"      Main notes detected: {len(raw_segments)}")
+    log(f"      Raw notes detected: {len(raw_segments)}")
+    raw_segments = correct_octave_jumps(raw_segments)
+    log(f"      Notes after octave correction: {len(raw_segments)}")
 
     # ── Step 6: Tuning & Rhythm Quantization ────────────────────────────
     log(f"\n[6/7] Quantizing pitch and rhythm...")
@@ -195,7 +197,6 @@ def open_in_musescore(file_path: str):
     if not os.path.exists(file_path):
         print(f"      ⚠ File not found: {file_path}")
         return
-
     system = platform.system()
     try:
         if system == "Linux":
@@ -235,7 +236,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("audio", help="Input audio file")
-    parser.add_argument("--output", "-o", default="output.xml", help="Output MusicXML file")
+    parser.add_argument("--output", "-o", default="OUTPUT.xml", help="Output MusicXML file")
     parser.add_argument("--maqam", "-m", default=None, help="Override maqam")
     parser.add_argument("--instrument", "-i", default="general", choices=list(INSTRUMENTS.keys()), help="Instrument type")
     parser.add_argument("--time-sig", "-t", default="4/4", help="Time signature")

@@ -201,8 +201,10 @@ def _clean_legato_and_ornaments(note_segments: List[dict], quantized_pitches: Li
 
         dur = seg["duration_sec"]
 
-        # 1. Grace Note Detection (< 90ms is usually a fast ornament/pluck)
-        is_ornament = dur < 0.09
+        # 1. Grace Note Detection (< 60ms is a fast ornament/pluck)
+        # Must be below min_note_duration (80ms) to avoid turning real notes
+        # that barely survived segmentation into invisible grace notes.
+        is_ornament = dur < 0.06
 
         # 2. Legato Gap Filling
         # Look ahead to the next note. If the gap is tiny (< 0.05s),
@@ -268,7 +270,7 @@ def quantize_rhythm_taksim(
                 start_beat=current_beat,
                 duration_beats=Fraction(0, 1), # Takes 0 logical time in XML
                 duration_sec=item["duration_sec"],
-                median_freq=item["median_freq"],
+                median_freq=pitch.freq_hz,
                 note_label=pitch.label,
                 is_micro=pitch.is_micro,
                 is_ornate=True,
@@ -285,7 +287,7 @@ def quantize_rhythm_taksim(
             start_beat=current_beat,
             duration_beats=quantized_dur,
             duration_sec=item["duration_sec"],
-            median_freq=item["median_freq"],
+            median_freq=pitch.freq_hz,
             note_label=pitch.label,
             is_micro=pitch.is_micro,
             is_ornate=False,

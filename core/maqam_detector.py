@@ -141,7 +141,10 @@ def detect_maqam_sota(
             if base_name not in MAQAM:
                 continue
             candidate_tonic_hz = comma_to_freq(MAQAM[base_name].tonic_abs)
-            dist_cents = abs(1200.0 * math.log2(tonic_hz / candidate_tonic_hz))
+            # Shift the theoretical tonic by this candidate's tuning offset
+            # so we compare against where the tonic *actually* sits for this performer
+            shifted_tonic_hz = candidate_tonic_hz * (2 ** (c.tuning_offset_cents / 1200.0))
+            dist_cents = abs(1200.0 * math.log2(tonic_hz / shifted_tonic_hz))
             if dist_cents > 600:
                 dist_cents = abs(dist_cents - 1200)  # correct for octave error
             if dist_cents <= MAQAM_DETECTION['tonic_match_window_cents']:
